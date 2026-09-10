@@ -1,0 +1,6 @@
+name = "review-bot-relay"
+main = "index.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+DISPATCH_REPO = "Project516/review-bot"
