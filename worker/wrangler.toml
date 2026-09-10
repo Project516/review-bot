@@ -1,0 +1,7 @@
+name = "review-bot-relay"
+main = "index.js"
+compatibility_date = "2026-01-01"
+
+# Repo whose Review workflow runs the review. Point this at your fork.
+[vars]
+DISPATCH_REPO = "Project516/review-bot"

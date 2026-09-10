@@ -1,0 +1,26 @@
+name: Review
+run-name: Review ${{ github.event.client_payload.repo }}#${{ github.event.client_payload.pr }} (${{ github.event.client_payload.action }})
+
+on:
+  repository_dispatch:
+    types: [review-request]
+
+concurrency:
+  group: review-${{ github.event.client_payload.repo }}-${{ github.event.client_payload.pr }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node src/review.js
+        env:
+          EVENT_JSON: ${{ toJSON(github.event.client_payload) }}
+          APP_ID: ${{ vars.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

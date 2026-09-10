@@ -1,0 +1,19 @@
+{
+  "owner": "Project516",
+  "allowed_repo_owners": ["Project516"],
+  "allowed_authors": ["Project516", "cappy-dev"],
+  "model": "openrouter/free",
+  "post_verdicts": false,
+  "max_diff_chars": 60000,
+  "ignore_paths": [
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "*.lock",
+    "*.min.js",
+    "*.min.css",
+    "*.snap",
+    "dist/",
+    "build/"
+  ]
+}
