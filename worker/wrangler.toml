@@ -2,6 +2,9 @@ name = "review-bot-relay"
 main = "index.js"
 compatibility_date = "2026-01-01"
 
-# Repo whose Review workflow runs the review. Point this at your fork.
-[vars]
-DISPATCH_REPO = "Project516/review-bot"
+# DISPATCH_REPO (the repo whose Review workflow runs the review) and
+# ALLOWED_REPO_OWNERS are not set here on purpose. The deploy workflow passes
+# both: the repo it is running in, and the owner list out of the
+# REVIEWBOT_POLICY secret, which is the one place that list lives. A hand-run
+# `wrangler deploy` leaves them unset and the Worker forwards nothing, which is
+# the safe way to be wrong.

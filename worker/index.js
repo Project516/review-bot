@@ -1,6 +1,6 @@
 // Webhook relay. GitHub posts every event here; the Worker checks the
 // signature, keeps only the events that can lead to a review, and forwards a
-// small job to the review-bot repo as a repository_dispatch. The review itself
+// small job to the review repo as a repository_dispatch. The review itself
 // runs in GitHub Actions, because a free-plan Worker has 10 ms of CPU and
 // 30 seconds of background time, and free models are slower than that.
 
@@ -15,6 +15,12 @@ export default {
 
     const job = pick(request.headers.get("x-github-event"), JSON.parse(body));
     if (!job) return new Response("ignored", { status: 200 });
+
+    // The App can be installed on any account, so this is the gate that keeps a
+    // stranger's install from spending the review repo's Actions minutes. The
+    // list is passed in at deploy time; the reviewer checks it again.
+    if (!allowedOwner(env.ALLOWED_REPO_OWNERS, job.repo)) return new Response("ignored", { status: 200 });
+    job.ref = await ref(env.WEBHOOK_SECRET, job.repo);
 
     const res = await fetch(`https://api.github.com/repos/${env.DISPATCH_REPO}/dispatches`, {
       method: "POST",
@@ -64,6 +70,23 @@ export function pick(event, p) {
     };
   }
   return null;
+}
+
+// allowedOwner gates on the owner half of "owner/name". owners is a comma
+// separated list, set from the REVIEWBOT_POLICY secret by the deploy workflow.
+export function allowedOwner(owners, repo) {
+  const owner = String(repo ?? "").split("/")[0].toLowerCase();
+  return Boolean(owner) && String(owners ?? "").split(",").some((o) => o.trim().toLowerCase() === owner);
+}
+
+// ref is the anonymous handle for a repo, the only name the public Actions log
+// of the review repo ever shows. Keyed by the webhook secret so a guessed repo
+// name cannot be confirmed against a run title.
+export async function ref(secret, repo) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(String(repo))));
+  return [...mac.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export async function verify(secret, header, body) {

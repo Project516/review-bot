@@ -3,7 +3,7 @@ name: Deploy worker
 on:
   push:
     branches: [master]
-    paths: [worker/**]
+    paths: [worker/**, .github/workflows/deploy-worker.yml]
   workflow_dispatch:
 
 jobs:
@@ -12,14 +12,30 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # The Worker forwards only for the owners in the REVIEWBOT_POLICY secret.
+      # Run this workflow by hand after changing that secret.
+      - id: policy
+        env:
+          REVIEWBOT_POLICY: ${{ secrets.REVIEWBOT_POLICY }}
+        run: |
+          owners=$(jq -er '.allowed_repo_owners | join(",")' <<< "$REVIEWBOT_POLICY") || {
+            echo "REVIEWBOT_POLICY secret is missing or has no allowed_repo_owners"
+            exit 1
+          }
+          echo "owners=$owners" >> "$GITHUB_OUTPUT"
       - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
+          vars: |
+            DISPATCH_REPO
+            ALLOWED_REPO_OWNERS
           secrets: |
             WEBHOOK_SECRET
             DISPATCH_TOKEN
         env:
+          DISPATCH_REPO: ${{ github.repository }}
+          ALLOWED_REPO_OWNERS: ${{ steps.policy.outputs.owners }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
