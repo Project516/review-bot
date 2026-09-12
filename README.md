@@ -1,4 +1,4 @@
-# review-bot
+# review-bot 
 
 A self-hosted GitHub App that reviews your pull requests with a free model from
 OpenRouter. It only acts on repos under accounts you list, only on PRs from
