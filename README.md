@@ -31,7 +31,15 @@ listening. Nothing else needs a server:
 - **OpenRouter `openrouter/free`.** A router that picks whichever free model is
   up. Free models are rate limited (about 20 requests a minute and a daily cap
   that grows once the account has had 10 dollars of credit). The client
-  retries on 429 and 5xx.
+  retries on 429 and 5xx, and also whenever the reply is not a review: the
+  router hands some requests to a model that thinks out loud or to a safety
+  classifier that answers `safe`, and each retry is routed afresh. Only a
+  parsed review is ever posted, so a working trace cannot land on a PR.
+
+Because this repo is public, its Actions logs and run titles are public too.
+The run is titled `Review request` and the job logs identify the pull request
+by an eight character hash, so browsing the Actions tab does not tell anyone
+which of your repos the bot is reading.
 
 No VPS. Oracle Cloud would work but is one more machine to keep alive for a
 job that runs a few times a day. A public repo gets unlimited Actions minutes

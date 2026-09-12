@@ -6,13 +6,17 @@ import { client, installationToken, GitHubError } from "./github.js";
 import { renderDiff, validLines } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
+import { installRedaction, tag } from "./redact.js";
 
 const VERDICT_EVENT = { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" };
 
 async function main() {
   const job = JSON.parse(requireEnv("EVENT_JSON"));
   const cfg = loadConfig();
-  console.log(`job: ${JSON.stringify(job)}`);
+  // This repo is public, so its Actions logs are too. Everything below is
+  // written as if a stranger were reading it.
+  installRedaction([job.repo, job.repo?.split("/")[1], job.author, job.sender]);
+  console.log(`job ${tag(job.repo, job.pr)}: ${job.event} ${job.action}`);
 
   const decision = decide(job, cfg);
   console.log(`decision: ${decision.review ? "review" : "skip"} (${decision.reason})`);
@@ -31,7 +35,7 @@ async function main() {
   if (!decision.forced) {
     const reviews = await api.paginate(`${base}/pulls/${job.pr}/reviews`);
     if (reviews.some((r) => r.body?.includes(marker))) {
-      console.log(`already reviewed ${pr.head.sha}, skipping`);
+      console.log("already reviewed this head commit, skipping");
       return;
     }
   }
@@ -43,9 +47,13 @@ async function main() {
     return;
   }
 
-  const { text, model } = await complete({ apiKey: requireEnv("OPENROUTER_API_KEY"), model: cfg.model, messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted }) });
-  console.log(`model ${model} replied with ${text.length} chars`);
-  const review = parseReview(text);
+  const { value: review, model } = await complete({
+    apiKey: requireEnv("OPENROUTER_API_KEY"),
+    model: cfg.model,
+    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted }),
+    accept: parseReview,
+  });
+  console.log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
 
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
   const inline = [];

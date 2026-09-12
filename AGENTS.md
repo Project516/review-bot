@@ -19,6 +19,10 @@ anyone else in. Read `README.md` for the flow and setup.
   the review body rather than dropped or guessed.
 - Fail loud in the Actions log, quiet on the PR. A skipped PR gets a log line,
   not a comment.
+- Only a parsed review gets published. A model that thinks out loud, answers as
+  a safety classifier, or runs out of tokens is retried, never posted.
+- This repo is public, so its Actions logs and run titles are too. Nothing
+  there may name the repo under review. `src/redact.js` is the choke point.
 
 ## Layout
 
@@ -54,3 +58,5 @@ anyone else in. Read `README.md` for the flow and setup.
   used to avoid reviewing the same head commit twice.
 - **stray comment**: a model comment whose path or line is not in the diff.
   It is listed in the review body under "Other notes" instead of inline.
+- **job tag**: the eight hex characters that stand in for `repo#pr` in the
+  public Actions log.

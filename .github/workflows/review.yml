@@ -1,5 +1,6 @@
 name: Review
-run-name: Review ${{ github.event.client_payload.repo }}#${{ github.event.client_payload.pr }} (${{ github.event.client_payload.action }})
+# The run title is public on this repo. It must not name the repo under review.
+run-name: Review request (${{ github.event.client_payload.event }})
 
 on:
   repository_dispatch:
