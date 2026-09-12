@@ -9,9 +9,28 @@ test("parses fenced JSON and normalises fields", () => {
   assert.deepEqual(r.comments, [{ path: "a.js", line: 3, body: "x" }]);
 });
 
-test("falls back to raw text when the model does not return JSON", () => {
-  const r = parseReview("Looks fine to me.");
-  assert.deepEqual(r, { summary: "Looks fine to me.", verdict: "comment", comments: [] });
+test("rejects prose so the caller retries instead of publishing it", () => {
+  assert.equal(parseReview("Looks fine to me."), null);
+});
+
+test("rejects a chain of thought that never reached the JSON", () => {
+  const trace = "We are given a PR that adds a workflow.\n\nLet's break down the changes:\n1. The step sets tags=(--tag x) and then\n\nThis is correct. However,";
+  assert.equal(parseReview(trace), null);
+});
+
+test("rejects a safety classifier verdict", () => {
+  assert.equal(parseReview("user\nsafe"), null);
+  assert.equal(parseReview("unsafe\nS6"), null);
+});
+
+test("rejects an object with no summary", () => {
+  assert.equal(parseReview('{"verdict":"approve","comments":[]}'), null);
+});
+
+test("drops a think block before looking for the review", () => {
+  const r = parseReview('<think>maybe {"summary":"draft","verdict":"request_changes"} no</think>\n{"summary":"final","verdict":"approve"}');
+  assert.equal(r.summary, "final");
+  assert.equal(r.verdict, "approve");
 });
 
 test("unknown verdicts become comment", () => {

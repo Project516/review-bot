@@ -24,6 +24,9 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   the review body rather than dropped or guessed.
 - Fail loud in the Actions log, quiet on the PR. A skipped PR gets a log line,
   not a comment.
+- Only a parsed review is ever published. A reply that is working notes, a
+  safety classifier verdict, or a chain of thought cut off by the token limit
+  is retried, and a job that never gets a review fails instead of posting one.
 - Nothing in a run title or a log line may name a repo, an owner or an author. New log output goes
   through the redactor in `src/log.js`, and new workflow expressions use
   `client_payload.ref`, never `client_payload.repo`.
