@@ -48,9 +48,14 @@ async function main() {
     return;
   }
 
-  const { text, model } = await complete({ apiKey: requireEnv("OPENROUTER_API_KEY"), model: cfg.model, messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted }) });
-  log(`model ${model} replied with ${text.length} chars`);
-  const review = parseReview(text);
+  const { value: review, model } = await complete({
+    apiKey: requireEnv("OPENROUTER_API_KEY"),
+    model: cfg.model,
+    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted }),
+    accept: parseReview,
+    log,
+  });
+  log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
 
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
   const inline = [];
