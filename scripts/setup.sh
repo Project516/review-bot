@@ -185,9 +185,28 @@ finish() {
 
 cd "$(dirname "$0")/.."
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || { echo "gh cannot see this repo; run from a clone with gh logged in" >&2; exit 1; })
-TOTAL_STAGES=7
+TOTAL_STAGES=8
 
 banner "review-bot setup"
+
+stage "Who the bot works for"
+say "This repo is public, so the accounts and people it reviews are not written down in it."
+say "They go in one Actions secret instead, and the bot reviews nothing without it."
+ask POLICY_OWNER "Your GitHub login (the only one who may comment /review):"
+ask POLICY_REPO_OWNERS "Accounts and orgs whose repos it may review, comma separated [$POLICY_OWNER]:"
+[[ -z "$POLICY_REPO_OWNERS" ]] && POLICY_REPO_OWNERS="$POLICY_OWNER"
+ask POLICY_AUTHORS "Logins whose PRs are reviewed without asking, comma separated [$POLICY_OWNER]:"
+[[ -z "$POLICY_AUTHORS" ]] && POLICY_AUTHORS="$POLICY_OWNER"
+write_env POLICY_OWNER "$POLICY_OWNER"
+write_env POLICY_REPO_OWNERS "$POLICY_REPO_OWNERS"
+write_env POLICY_AUTHORS "$POLICY_AUTHORS"
+json_list() { printf '%s' "$1" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | jq -R . | jq -s -c .; }
+REVIEWBOT_POLICY=$(jq -n -c --arg owner "$POLICY_OWNER" \
+  --argjson repo_owners "$(json_list "$POLICY_REPO_OWNERS")" \
+  --argjson authors "$(json_list "$POLICY_AUTHORS")" \
+  '{owner: $owner, allowed_repo_owners: $repo_owners, allowed_authors: $authors}')
+set_secret REVIEWBOT_POLICY "$REVIEWBOT_POLICY"
+note "Change it later with: gh secret set REVIEWBOT_POLICY, then run the Deploy worker workflow."
 
 stage "OpenRouter API key"
 say "The reviewer calls OpenRouter with the openrouter/free router, so it costs nothing."
@@ -224,10 +243,10 @@ note "You will paste it into the GitHub App form in a later stage."
 pause
 
 stage "Dispatch token"
-say "The Worker needs a token to start the review workflow in $REPO. A fine-grained token"
+say "The Worker needs a token to start the review workflow in this repo. A fine-grained token"
 say "scoped to this one repo is the smallest thing that works."
 open_url "https://github.com/settings/personal-access-tokens/new"
-step "Token name: review-bot-dispatch. Expiration: 1 year (custom). Repository access: Only select repositories, pick ${REPO#*/}."
+step "Token name: review-bot-dispatch. Expiration: 1 year (custom). Repository access: Only select repositories, pick this repo."
 step "Repository permissions: Contents, Read and write. Nothing else. Generate token, copy it."
 warn "Put a calendar reminder a year out: when it expires the bot goes silent with 401s in the Worker."
 ask_secret DISPATCH_TOKEN "Paste the token:"
@@ -261,12 +280,13 @@ write_env WEBHOOK_URL "$WEBHOOK_URL"
 stage "GitHub App"
 say "Now the App itself. Fill the form exactly like this:"
 open_url "https://github.com/settings/apps/new"
-step "GitHub App name: something unique, e.g. <you>-review-bot. Homepage URL: https://github.com/$REPO"
+step "GitHub App name: something unique, e.g. <you>-review-bot. Homepage URL: the URL of this repo."
 step "Webhook: Active. Webhook URL: $WEBHOOK_URL"
 step "Webhook secret: $WEBHOOK_SECRET"
 step "Repository permissions: Contents Read-only; Issues Read and write; Pull requests Read and write. (Metadata is added automatically.)"
 step "Subscribe to events: Issue comment, Pull request."
-step "Where can this GitHub App be installed: Only on this account."
+step "Where can this GitHub App be installed: Any account. An org you own counts as another account, so this is the only setting that lets the bot run on org repos."
+note "allowed_repo_owners is what keeps it yours: the Worker drops webhooks from any other owner before they cost a run."
 step "Create GitHub App. On the next page copy the App ID (top of the General tab)."
 ask APP_ID "Paste the App ID:"
 write_env APP_ID "$APP_ID"
@@ -283,13 +303,16 @@ else
 fi
 
 stage "Install the App"
-say "Install it on every repo whose PRs it should review. Installing on $REPO too means it reviews its own PRs."
+say "Install it on every repo whose PRs it should review. Installing on this repo too means it reviews its own PRs."
+say "Install it once per account: your own, then each org you own."
 ask APP_SLUG "App slug (the name you gave it, lowercased with dashes):"
 open_url "https://github.com/apps/$APP_SLUG/installations/new"
-step "Pick Only select repositories, choose the repos, Install."
+step "Pick the account, then Only select repositories, choose the repos, Install. Repeat for each org."
+warn "Every account you install on must be in allowed_repo_owners, and the Worker only picks up a changed list when the Deploy worker workflow runs."
 pause "Installed?"
 say "Test: open a PR as yourself on one of those repos. The Worker answers GitHub with 'queued',"
-say "a Review run appears under Actions in $REPO, and a review lands on the PR a minute or two later."
-say "Add or remove authors in reviewbot.json. Comment /review on any PR to review it regardless of author."
+say "a Review run appears under Actions here, and a review lands on the PR a minute or two later."
+say "Add or remove authors and owners with: gh secret set REVIEWBOT_POLICY, then run the Deploy worker workflow."
+say "Comment /review on any PR to review it regardless of author."
 
 finish

@@ -1,9 +1,6 @@
 {
-  "owner": "Project516",
-  "allowed_repo_owners": ["Project516"],
-  "allowed_authors": ["Project516", "cappy-dev"],
   "model": "openrouter/free",
-  "post_verdicts": false,
+  "post_verdicts": true,
   "max_diff_chars": 60000,
   "ignore_paths": [
     "pnpm-lock.yaml",

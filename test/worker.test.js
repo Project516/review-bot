@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { pick, verify } from "../worker/index.js";
+import { allowedOwner, pick, ref, verify } from "../worker/index.js";
 
 const repo = { repository: { full_name: "octocat/x" }, installation: { id: 7 } };
 
@@ -28,4 +28,21 @@ test("verify accepts a good signature and rejects bad ones", async () => {
   assert.equal(await verify("s3cret", sig, body + " "), false);
   assert.equal(await verify("s3cret", "sha256=zz", body), false);
   assert.equal(await verify("s3cret", null, body), false);
+});
+
+test("allowedOwner keeps listed owners and drops everyone else", () => {
+  assert.equal(allowedOwner("octocat,OtherOrg", "OCTOCAT/x"), true);
+  assert.equal(allowedOwner("octocat, OtherOrg", "otherorg/y"), true);
+  assert.equal(allowedOwner("octocat", "stranger/x"), false);
+  assert.equal(allowedOwner("", "octocat/x"), false);
+  assert.equal(allowedOwner(undefined, "octocat/x"), false);
+  assert.equal(allowedOwner("octocat", undefined), false);
+});
+
+test("ref is a stable 8 hex handle that depends on the secret", async () => {
+  const a = await ref("s3cret", "octocat/x");
+  assert.match(a, /^[0-9a-f]{8}$/);
+  assert.equal(a, await ref("s3cret", "octocat/x"));
+  assert.notEqual(a, await ref("s3cret", "octocat/y"));
+  assert.notEqual(a, await ref("other", "octocat/x"));
 });

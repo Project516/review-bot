@@ -6,16 +6,21 @@ import { client, installationToken, GitHubError } from "./github.js";
 import { renderDiff, validLines } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
+import { redactor } from "./log.js";
+
+// Set once the job is parsed, so the top-level failure handler can scrub too.
+let scrub = String;
 
 const VERDICT_EVENT = { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" };
 
 async function main() {
   const job = JSON.parse(requireEnv("EVENT_JSON"));
   const cfg = loadConfig();
-  console.log(`job: ${JSON.stringify(job)}`);
+  const log = install(job);
+  log(`job: ${job.event} ${job.action} on ${job.ref ?? "<repo>"}#${job.pr}`);
 
   const decision = decide(job, cfg);
-  console.log(`decision: ${decision.review ? "review" : "skip"} (${decision.reason})`);
+  log(`decision: ${decision.review ? "review" : "skip"} (${decision.reason})`);
   if (!decision.review) return;
 
   const token = await installationToken(requireEnv("APP_ID"), requireEnv("APP_PRIVATE_KEY"), job.installation);
@@ -23,7 +28,7 @@ async function main() {
   const base = `/repos/${job.repo}`;
 
   if (job.comment_id) {
-    await api.post(`${base}/issues/comments/${job.comment_id}/reactions`, { content: "eyes" }).catch((e) => console.log(`reaction failed: ${e.message}`));
+    await api.post(`${base}/issues/comments/${job.comment_id}/reactions`, { content: "eyes" }).catch((e) => log(`reaction failed: ${e.message}`));
   }
 
   const pr = await api.get(`${base}/pulls/${job.pr}`);
@@ -31,7 +36,7 @@ async function main() {
   if (!decision.forced) {
     const reviews = await api.paginate(`${base}/pulls/${job.pr}/reviews`);
     if (reviews.some((r) => r.body?.includes(marker))) {
-      console.log(`already reviewed ${pr.head.sha}, skipping`);
+      log(`already reviewed ${pr.head.sha}, skipping`);
       return;
     }
   }
@@ -39,12 +44,12 @@ async function main() {
   const files = await api.paginate(`${base}/pulls/${job.pr}/files`);
   const diff = renderDiff(files, cfg);
   if (!diff.text) {
-    console.log("no reviewable text diff, skipping");
+    log("no reviewable text diff, skipping");
     return;
   }
 
   const { text, model } = await complete({ apiKey: requireEnv("OPENROUTER_API_KEY"), model: cfg.model, messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted }) });
-  console.log(`model ${model} replied with ${text.length} chars`);
+  log(`model ${model} replied with ${text.length} chars`);
   const review = parseReview(text);
 
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
@@ -61,17 +66,23 @@ async function main() {
 
   try {
     await api.post(`${base}/pulls/${job.pr}/reviews`, { commit_id: pr.head.sha, event, body: body(stray), comments: inline });
-    console.log(`posted review: ${inline.length} inline, ${stray.length} in body`);
+    log(`posted review: ${inline.length} inline, ${stray.length} in body`);
   } catch (e) {
     if (!(e instanceof GitHubError && e.status === 422) || inline.length === 0) throw e;
-    console.log(`inline comments rejected (${e.message}), posting body only`);
+    log(`inline comments rejected (${e.message}), posting body only`);
     await api.post(`${base}/pulls/${job.pr}/reviews`, { commit_id: pr.head.sha, event, body: body([...inline, ...stray]) });
   }
+}
+
+function install(job) {
+  const r = redactor(job);
+  scrub = r.scrub;
+  return r.log;
 }
 
 const fmtStray = (c) => `- \`${c.path}\`${Number.isFinite(c.line) ? `:${c.line}` : ""}: ${c.body}`;
 
 main().catch((e) => {
-  console.error(e);
+  console.error(scrub(e?.stack ?? e));
   process.exit(1);
 });

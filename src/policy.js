@@ -1,9 +1,11 @@
 // decide answers one question: does this job get a review, and why.
-// job comes from the Worker (see worker/index.js pick), cfg from reviewbot.json.
+// job comes from the Worker (see worker/index.js pick), cfg from loadConfig.
 export function decide(job, cfg) {
   const same = (a, b) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
   const listed = (list, name) => list.some((x) => same(x, name));
   const skip = (reason) => ({ review: false, forced: false, reason });
+
+  if (!cfg.allowed_repo_owners?.length) return skip("no allowed_repo_owners; set the REVIEWBOT_POLICY secret");
 
   const repoOwner = job.repo?.split("/")[0];
   if (!listed(cfg.allowed_repo_owners, repoOwner)) return skip(`repo owner ${repoOwner} is not allowed`);
