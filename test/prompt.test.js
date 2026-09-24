@@ -91,3 +91,19 @@ test("buildReplyMessages copes with an empty diff", () => {
   const [, user] = buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, diffText: "", slug: "review-bot" });
   assert.match(user.content, /\(no text diff\)/);
 });
+
+test("buildReplyMessages lists check runs at head and says when they are unknown", () => {
+  const thread = { comments: { nodes: [{ databaseId: 1, author: { login: "review-bot" }, body: "does it build?", path: "a.js", line: 5 }] } };
+  const build = (checks) => buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, diffText: "", checks, slug: "review-bot" });
+  const runs = [
+    { name: "build", status: "completed", conclusion: "failure" },
+    { name: "lint", status: "in_progress", conclusion: null },
+  ];
+  const [system, user] = build({ runs, more: 0 });
+  assert.match(system.content, /claim, not evidence/);
+  assert.match(user.content, /<checks>\n- build: failure\n- lint: in_progress\n<\/checks>/);
+  assert.doesNotMatch(user.content, /incomplete/);
+  assert.match(build({ runs, more: 3 })[1].content, /<\/checks>\n\(3 more not shown, so this list is incomplete/);
+  assert.match(build({ runs: [], more: 0 })[1].content, /\(none reported\)/);
+  assert.match(build(null)[1].content, /\(unavailable, treat the build and test status as unknown\)/);
+});

@@ -82,16 +82,25 @@ the bot already covered. Draft PRs wait until they are marked ready.
 ### Replies
 
 Reply to one of the bot's inline review comments and, if you are the owner or
-an allowed author, it reads the thread and the whole PR diff at head, then
-answers: it concedes when the fix landed or your pushback is right, or pushes
-back with its reasoning. A conceded reply marks the thread settled, and once
-every thread from the bot's last `REQUEST_CHANGES` review is settled, it
-approves the PR so the requested changes are lifted. It does not resolve the
-thread itself, since that needs Contents write; resolve it by hand once it
-concedes if you want it folded away. After three replies in one thread without
+an allowed author, it reads the thread, the whole PR diff and the check runs
+at head, then answers: it concedes when the fix landed or your pushback is
+right, or pushes back with its reasoning. A comment saying CI passed does not
+count on its own; a concern about the build or tests is only dropped when the
+check runs on the head commit show it. A conceded reply marks the thread
+settled and resolves it, and once every thread from the bot's last
+`REQUEST_CHANGES` review is settled, it approves the PR so the requested
+changes are lifted. After three replies in one thread without
 agreement it stops and leaves it for you. Replies from anyone else are
 skipped. The App needs the "Pull request review comment" webhook event for
 this to work; add it if you set the App up before this existed.
+
+Resolving a thread is the one call GitHub gates behind Contents write, so the
+App holds it, but every job runs on a token narrowed to Contents read, Issues
+and Pull requests write, and Checks read. Only the resolve call mints a token
+with Contents write, and the code never uses it for anything else. An App set
+up before this needs Contents raised to Read and write and Checks added as
+Read-only, and each installation has to accept the new permissions, or every
+job fails at the token step.
 
 ### Keeping it yours
 

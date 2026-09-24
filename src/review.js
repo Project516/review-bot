@@ -14,6 +14,12 @@ import { reply, fetchThreads, isSettled, footer } from "./reply.js";
 // Set once the job is parsed, so the top-level failure handler can scrub too.
 let scrub = String;
 
+// Every job runs on a token without Contents write. Only resolving a review
+// thread needs it, so that one call gets its own short-lived token.
+const JOB_PERMISSIONS = { contents: "read", issues: "write", pull_requests: "write", checks: "read" };
+const RESOLVE_PERMISSIONS = { contents: "write", pull_requests: "write" };
+const RESOLVE_MUTATION = `mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
+
 const VERDICT_EVENT = { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" };
 
 // readJob takes EVENT_JSON when set, for a run by hand, and otherwise the
@@ -35,13 +41,17 @@ async function main() {
 
   const appId = requireEnv("APP_ID");
   const privateKey = requireEnv("APP_PRIVATE_KEY");
-  const token = await installationToken(appId, privateKey, job.installation);
+  const token = await installationToken(appId, privateKey, job.installation, JOB_PERMISSIONS);
   const api = client(token);
   const base = `/repos/${job.repo}`;
 
   if (decision.reply) {
     const slug = await appSlug(appId, privateKey);
-    await reply({ api, job, cfg, log, slug, apiKey: requireEnv("OPENROUTER_API_KEY") });
+    const resolveThread = async (id) => {
+      const writer = client(await installationToken(appId, privateKey, job.installation, RESOLVE_PERMISSIONS));
+      await writer.graphql(RESOLVE_MUTATION, { id });
+    };
+    await reply({ api, job, cfg, log, slug, resolveThread, apiKey: requireEnv("OPENROUTER_API_KEY") });
     return;
   }
 

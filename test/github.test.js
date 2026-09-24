@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { client, appSlug, GitHubError } from "../src/github.js";
+import { client, appSlug, installationToken, GitHubError } from "../src/github.js";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const pem = privateKey.export({ type: "pkcs1", format: "pem" });
@@ -51,6 +51,22 @@ test("appSlug reads the slug off GET /app", async () => {
   });
   try {
     assert.equal(await appSlug(1, pem), "review-bot");
+  } finally {
+    restore();
+  }
+});
+
+test("installationToken sends permissions only when narrowing", async () => {
+  const bodies = [];
+  const restore = stubFetch(async (url, init) => {
+    assert.equal(url, "https://api.github.com/app/installations/7/access_tokens");
+    bodies.push(init.body);
+    return new Response(JSON.stringify({ token: "tok" }), { status: 201 });
+  });
+  try {
+    assert.equal(await installationToken(1, pem, 7), "tok");
+    assert.equal(await installationToken(1, pem, 7, { contents: "write" }), "tok");
+    assert.deepEqual(bodies, [undefined, JSON.stringify({ permissions: { contents: "write" } })]);
   } finally {
     restore();
   }

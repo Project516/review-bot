@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isBot, findThread, isSettled, skipReason, latestBotReview, shouldApprove, footer } from "../src/reply.js";
+import { isBot, findThread, isSettled, skipReason, latestBotReview, shouldApprove, footer, fetchChecks } from "../src/reply.js";
 
 const SLUG = "review-bot";
 const bot = (login) => ({ login });
@@ -89,4 +89,18 @@ test("shouldApprove requires the settled thread to belong to a current, unfinish
 
 test("footer names the model, verdict and carries the marker", () => {
   assert.equal(footer("m/x", "approve", "<!-- review-bot head=sha -->"), "---\n<sub>review-bot, model m/x, verdict approve</sub>\n<!-- review-bot head=sha -->");
+});
+
+test("fetchChecks keeps name, status and conclusion, counts runs past the first page, and is null when the checks cannot be read", async () => {
+  const api = {
+    get: async (path) => {
+      assert.equal(path, "/repos/o/r/commits/abc/check-runs?per_page=100");
+      return { total_count: 101, check_runs: [{ name: "build", status: "completed", conclusion: "success", id: 9 }] };
+    },
+  };
+  assert.deepEqual(await fetchChecks(api, "o/r", "abc", () => {}), { runs: [{ name: "build", status: "completed", conclusion: "success" }], more: 100 });
+  const lines = [];
+  const denied = { get: async () => { throw new Error("403"); } };
+  assert.equal(await fetchChecks(denied, "o/r", "abc", (l) => lines.push(l)), null);
+  assert.deepEqual(lines, ["reply: checks unavailable: 403"]);
 });
