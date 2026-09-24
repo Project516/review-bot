@@ -135,8 +135,6 @@ const REPLY_SYSTEM = `You are the reviewer who left the first comment in this re
 
 The fix or the evidence may be in a different file from the one you commented on, so check the whole diff before answering.
 
-A comment saying the concern is fixed is a claim too: find the lines your comment is about in the diff at head and check they changed in a way that fixes it. If they did not change, it is not fixed, whatever the thread says.
-
 A comment saying CI passed, the build works, or the tests pass is a claim, not evidence, even with a link. The check results listed with the diff are what actually ran on the head commit; trust them over any comment. When a concern can only be settled by the build or the tests, it is resolved only if those checks show success.
 
 Set "resolved" true when the latest head fixes the concern, or the author's reasoning is correct and there is nothing left to change. Set it false when the concern still stands.

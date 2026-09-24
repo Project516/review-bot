@@ -9,10 +9,10 @@ const NUDGE = {
 
 // complete calls OpenRouter until accept() turns the reply into something
 // usable, retrying on rate limits, upstream failures, truncated answers, and
-// replies that are not a review at all. Attempt i goes to models[i], wrapping
-// around, so a retry is also how we get off a model that is down, gone from
-// the free list, or thinking out loud.
-export async function complete({ apiKey, models, messages, accept = (t) => t, attempts = 5, backoff = 15000, log = console.log }) {
+// replies that are not a review at all. The free router picks a different
+// model per call, so a retry is also how we get off a model that thinks out
+// loud or that answers as a safety classifier.
+export async function complete({ apiKey, model, messages, accept = (t) => t, attempts = 5, backoff = 15000, log = console.log }) {
   let last = "no attempt made";
   let nudge = false;
   for (let i = 0; i < attempts; i++) {
@@ -21,7 +21,6 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
       log(`openrouter attempt ${i} failed (${last}), retrying in ${wait / 1000}s`);
       await sleep(wait);
     }
-    const model = models[i % models.length];
     const res = await fetch(URL, {
       method: "POST",
       headers: {
@@ -39,11 +38,8 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
     });
     const body = await res.text();
     if (!res.ok) {
-      // 400 and 404 are what a model that left the free list or cannot take
-      // this prompt answers; the next model may not. Auth and credit errors
-      // would fail the same way on every model.
-      if (![400, 404, 429].includes(res.status) && res.status < 500) throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 500)}`);
-      last = `${model} ${res.status}: ${body.slice(0, 300)}`;
+      if (res.status !== 429 && res.status < 500) throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 500)}`);
+      last = `${res.status}: ${body.slice(0, 300)}`;
       continue;
     }
     const data = JSON.parse(body);

@@ -209,7 +209,7 @@ set_secret REVIEWBOT_POLICY "$REVIEWBOT_POLICY"
 note "Change it later with: gh secret set REVIEWBOT_POLICY, then run the Deploy worker workflow."
 
 stage "OpenRouter API key"
-say "The reviewer calls free OpenRouter models listed in reviewbot.json, so it costs nothing."
+say "The reviewer calls OpenRouter with the openrouter/free router, so it costs nothing."
 open_url "https://openrouter.ai/settings/keys"
 step "Create key, name it review-bot, no credit limit needed. Copy it."
 ask_secret OPENROUTER_API_KEY "Paste the OpenRouter key:"

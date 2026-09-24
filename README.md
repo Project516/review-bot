@@ -27,17 +27,14 @@ listening. Nothing else needs a server:
   workflow, which fetches the diff with an installation token, asks OpenRouter,
   and posts the review. The PR being reviewed can be in any repo the App is
   installed on; the minutes are always spent here.
-- **OpenRouter free models.** `reviewbot.json` lists a few of the stronger
-  free models, and each attempt goes to the next one on the list. Free models
-  are rate limited (about 20 requests a minute and a daily cap that grows once
-  the account has had 10 dollars of credit). The client retries on 429 and
-  5xx, on a model that is gone from the free list, and whenever the reply is
-  not a review, so a retry is how the job gets off a model that is down or
-  thinks out loud. The `openrouter/free` router is not used: it hands some
-  requests to tiny models and safety classifiers, and a tiny model will
-  concede a point it should not. When a model leaves the free list, swap it
-  out; `curl -s https://openrouter.ai/api/v1/models` lists the current ones.
-  Only a parsed review is posted, so working notes cannot land on a PR.
+- **OpenRouter `openrouter/free`.** A router that picks whichever free model is
+  up. Free models are rate limited (about 20 requests a minute and a daily cap
+  that grows once the account has had 10 dollars of credit). The client
+  retries on 429 and 5xx, and also whenever the reply is not a review. The
+  router hands some requests to a model that thinks out loud in plain text and
+  some to a safety classifier that answers `safe`, and each retry is routed
+  afresh, so a retry is how the job gets off that model. Only a parsed review
+  is posted, so working notes cannot land on a PR.
 
 No VPS. Oracle Cloud would work but is one more machine to keep alive for a
 job that runs a few times a day. A public repo gets unlimited Actions minutes
@@ -72,7 +69,7 @@ worker` workflow.
 
 | key | meaning |
 | --- | --- |
-| `models` | OpenRouter model ids, tried in order, one per attempt |
+| `model` | OpenRouter model id |
 | `post_verdicts` | `false` posts everything as a comment review; `true` lets the model approve or request changes |
 | `max_diff_chars` | budget for the diff sent to the model; files past it are listed, not shown |
 | `ignore_paths` | exact names, `*.suffix`, or `dir/` prefixes to leave out |

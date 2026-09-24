@@ -1,11 +1,5 @@
 {
-  "models": [
-    "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "qwen/qwen3.8-27b:free",
-    "nex-agi/nex-n2.5-pro:free",
-    "thinkingmachines/inkling:free",
-    "nvidia/nemotron-3-super-120b-a12b:free"
-  ],
+  "model": "openrouter/free",
   "post_verdicts": true,
   "max_diff_chars": 60000,
   "ignore_paths": [
