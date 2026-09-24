@@ -82,11 +82,13 @@ the bot already covered. Draft PRs wait until they are marked ready.
 ### Replies
 
 Reply to one of the bot's inline review comments and, if you are the owner or
-an allowed author, it reads the thread and the whole PR diff at head, then answers: it concedes when the fix
-landed or your pushback is right, or pushes back with its reasoning. A
-conceded reply resolves the thread, and once every thread from the bot's last
-`REQUEST_CHANGES` review is settled that way, it approves the PR so the
-requested changes are lifted. After three replies in one thread without
+an allowed author, it reads the thread and the whole PR diff at head, then
+answers: it concedes when the fix landed or your pushback is right, or pushes
+back with its reasoning. A conceded reply marks the thread settled, and once
+every thread from the bot's last `REQUEST_CHANGES` review is settled, it
+approves the PR so the requested changes are lifted. It does not resolve the
+thread itself, since that needs Contents write; resolve it by hand once it
+concedes if you want it folded away. After three replies in one thread without
 agreement it stops and leaves it for you. Replies from anyone else are
 skipped. The App needs the "Pull request review comment" webhook event for
 this to work; add it if you set the App up before this existed.
