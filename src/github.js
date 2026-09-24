@@ -9,9 +9,12 @@ export function appJwt(appId, privateKey, now = Math.floor(Date.now() / 1000)) {
   return `${unsigned}.${sig}`;
 }
 
-export async function installationToken(appId, privateKey, installationId) {
+// installationToken mints a token for one installation. permissions narrows
+// it to a subset of what the App holds; GitHub refuses the request when the
+// installation has not granted one of them.
+export async function installationToken(appId, privateKey, installationId, permissions) {
   const app = client(appJwt(appId, privateKey));
-  const res = await app.post(`/app/installations/${installationId}/access_tokens`);
+  const res = await app.post(`/app/installations/${installationId}/access_tokens`, permissions ? { permissions } : undefined);
   return res.token;
 }
 

@@ -1,8 +1,9 @@
 // Answers a reply on one of the bot's own inline review comments: read the
-// thread, ask the model whether the concern still stands, post the reply,
-// and lift a CHANGES_REQUESTED review once every thread it raised is settled.
-// It does not resolve threads: the GraphQL mutation needs Contents write,
-// which the App does not hold. The settled marker is the state that counts.
+// thread, the diff and the check results at head, ask the model whether the
+// concern still stands, post the reply, and when it is settled, resolve the
+// thread and lift a CHANGES_REQUESTED review once every thread it raised is
+// settled. The settled marker is the state that counts; a resolve that fails
+// is logged and changes nothing else.
 import { buildReplyMessages, parseReply } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { renderDiff } from "./diff.js";
@@ -130,8 +131,21 @@ export function footer(model, verdict, marker) {
   return `---\n<sub>review-bot, model ${model}, verdict ${verdict}</sub>\n${marker}`;
 }
 
-export async function reply({ api, job, cfg, log, slug, apiKey }) {
-  const { threads } = await fetchThreads(api.graphql, job.repo, job.pr);
+// fetchChecks lists the check runs on a commit as { name, status, conclusion },
+// or null when they cannot be read, so the model is told they are unknown
+// rather than that nothing ran.
+export async function fetchChecks(api, repo, sha, log) {
+  try {
+    const res = await api.get(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`);
+    return res.check_runs.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion }));
+  } catch (e) {
+    log(`reply: checks unavailable: ${e.message}`);
+    return null;
+  }
+}
+
+export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey }) {
+  const { headRefOid, threads } = await fetchThreads(api.graphql, job.repo, job.pr);
   const thread = findThread(threads, job.thread);
   const reason = skipReason(thread, slug);
   if (reason) {
@@ -143,11 +157,12 @@ export async function reply({ api, job, cfg, log, slug, apiKey }) {
   const files = await api.paginate(`/repos/${job.repo}/pulls/${job.pr}/files`);
   // The commented file goes first so the diff budget never squeezes it out.
   const diff = renderDiff([...files].sort((a, b) => (b.filename === root.path) - (a.filename === root.path)), cfg);
+  const checks = await fetchChecks(api, job.repo, headRefOid, log);
 
   const { value, model } = await complete({
     apiKey,
     model: cfg.model,
-    messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, slug }),
+    messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, checks, slug }),
     accept: parseReply,
     log,
   });
@@ -159,6 +174,8 @@ export async function reply({ api, job, cfg, log, slug, apiKey }) {
   await api.post(`/repos/${job.repo}/pulls/${job.pr}/comments/${job.thread}/replies`, { body });
   log(`reply: posted, resolved=${value.resolved}`);
   if (!value.resolved) return;
+
+  await resolveThread(thread.id).catch((e) => log(`reply: resolve failed: ${e.message}`));
 
   // Re-read after posting: a reply in another thread of the same review may
   // have settled it while the model was thinking.
