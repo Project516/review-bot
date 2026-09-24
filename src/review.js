@@ -1,6 +1,7 @@
-// Entry point for the Actions job. Reads the job the Worker dispatched from
-// EVENT_JSON, applies reviewbot.json, and posts one review on the PR, or, for
-// a reply job, hands off to reply.js.
+// Entry point for the Actions job. Reads the job the Worker dispatched,
+// applies reviewbot.json, and posts one review on the PR, or, for a reply
+// job, hands off to reply.js.
+import { readFileSync } from "node:fs";
 import { loadConfig, requireEnv } from "./config.js";
 import { decide } from "./policy.js";
 import { client, installationToken, appSlug, GitHubError } from "./github.js";
@@ -15,8 +16,15 @@ let scrub = String;
 
 const VERDICT_EVENT = { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" };
 
+// readJob takes EVENT_JSON when set, for a run by hand, and otherwise the
+// repository_dispatch payload from the file Actions writes to GITHUB_EVENT_PATH.
+function readJob() {
+  if (process.env.EVENT_JSON) return JSON.parse(process.env.EVENT_JSON);
+  return JSON.parse(readFileSync(requireEnv("GITHUB_EVENT_PATH"), "utf8")).client_payload;
+}
+
 async function main() {
-  const job = JSON.parse(requireEnv("EVENT_JSON"));
+  const job = readJob();
   const cfg = loadConfig();
   const log = install(job);
   log(`job: ${job.event} ${job.action} on ${job.ref ?? "<repo>"}#${job.pr}`);

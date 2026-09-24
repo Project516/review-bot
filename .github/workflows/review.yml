@@ -20,9 +20,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # The job is read from the event file, not passed in env: Actions prints a
+      # step's env in the log, and the payload names the repo and author.
       - run: node src/review.js
         env:
-          EVENT_JSON: ${{ toJSON(github.event.client_payload) }}
           REVIEWBOT_POLICY: ${{ secrets.REVIEWBOT_POLICY }}
           APP_ID: ${{ vars.APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
