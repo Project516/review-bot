@@ -91,7 +91,7 @@ async function main() {
 
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
-    model: cfg.model,
+    models: cfg.models,
     messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled }),
     accept: parseReview,
     log,

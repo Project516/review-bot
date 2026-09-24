@@ -9,6 +9,7 @@ import { complete } from "./openrouter.js";
 import { renderDiff } from "./diff.js";
 
 const SETTLED_MARKER = "<!-- review-bot settled -->";
+const HEAD_MARKER = "<!-- review-bot head=";
 
 // THREADS_QUERY is shared by review.js, which uses it to find already-settled
 // points to keep out of a fresh review, and by reply.js, which uses it to
@@ -97,10 +98,12 @@ export function skipReason(thread, slug) {
 }
 
 // latestBotReview picks the bot's most recent review that still counts,
-// ignoring ones it dismissed or left pending. Reviews come back chronological.
+// ignoring ones it dismissed or left pending, and the empty COMMENTED reviews
+// GitHub wraps each thread reply in: only a real review carries the head
+// marker. Reviews come back chronological.
 export function latestBotReview(reviews, slug) {
   return reviews
-    .filter((r) => isBot(r.user?.login, slug))
+    .filter((r) => isBot(r.user?.login, slug) && r.body?.includes(HEAD_MARKER))
     .filter((r) => r.state !== "DISMISSED" && r.state !== "PENDING")
     .at(-1);
 }
@@ -163,7 +166,7 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
 
   const { value, model } = await complete({
     apiKey,
-    model: cfg.model,
+    models: cfg.models,
     messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, checks, slug }),
     accept: parseReply,
     log,

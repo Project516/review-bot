@@ -59,13 +59,15 @@ test("skipReason rejects a missing thread, a human root, an already-answered thr
   assert.equal(skipReason(fresh, SLUG), null);
 });
 
-test("latestBotReview ignores dismissed and pending reviews and other users", () => {
+test("latestBotReview ignores dismissed and pending reviews, reply wrappers and other users", () => {
   // Reviews come from REST, which appends "[bot]" to the App's login.
   const reviews = [
-    { id: 1, user: bot(`${SLUG}[bot]`), state: "CHANGES_REQUESTED" },
-    { id: 2, user: bot("octocat"), state: "APPROVED" },
-    { id: 3, user: bot(`${SLUG}[bot]`), state: "DISMISSED" },
-    { id: 4, user: bot(`${SLUG}[bot]`), state: "PENDING" },
+    { id: 1, user: bot(`${SLUG}[bot]`), state: "CHANGES_REQUESTED", body: "fix it\n<!-- review-bot head=abc -->" },
+    { id: 2, user: bot("octocat"), state: "APPROVED", body: "" },
+    { id: 3, user: bot(`${SLUG}[bot]`), state: "DISMISSED", body: "<!-- review-bot head=abc -->" },
+    { id: 4, user: bot(`${SLUG}[bot]`), state: "PENDING", body: "<!-- review-bot head=abc -->" },
+    // The wrapper GitHub creates around one of the bot's thread replies.
+    { id: 5, user: bot(`${SLUG}[bot]`), state: "COMMENTED", body: "" },
   ];
   assert.equal(latestBotReview(reviews, SLUG).id, 1);
   assert.equal(latestBotReview([], SLUG), undefined);
