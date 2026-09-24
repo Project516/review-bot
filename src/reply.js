@@ -16,10 +16,12 @@ query($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       headRefOid
       reviewThreads(first: 100) {
+        pageInfo { hasNextPage }
         nodes {
           id
           isResolved
           comments(first: 100) {
+            pageInfo { hasNextPage }
             nodes {
               databaseId
               author { login }
@@ -43,7 +45,11 @@ export async function fetchThreads(graphql, repo, pr) {
   const [owner, name] = repo.split("/");
   const data = await graphql(THREADS_QUERY, { owner, name, number: pr });
   const node = data.repository.pullRequest;
-  return { headRefOid: node.headRefOid, threads: node.reviewThreads.nodes };
+  const threads = node.reviewThreads.nodes;
+  // Only the first page is fetched. truncated tells a caller the list is not
+  // the whole story, so it must not approve on it.
+  const truncated = node.reviewThreads.pageInfo.hasNextPage || threads.some((t) => t.comments.pageInfo?.hasNextPage);
+  return { headRefOid: node.headRefOid, threads, truncated };
 }
 
 // GraphQL reports a bot's login as the bare App slug; REST appends "[bot]".
@@ -103,8 +109,9 @@ export function latestBotReview(reviews, slug) {
 // have no stray comments left over, and every thread it rooted must be
 // settled, counting `thread` itself since its marker was just posted. review
 // is REST data (`id`), threads are GraphQL (`databaseId`); the numbers match.
-export function shouldApprove({ review, threads, thread, slug, headRefOid, postVerdicts }) {
+export function shouldApprove({ review, threads, thread, slug, headRefOid, postVerdicts, truncated = false }) {
   if (!postVerdicts) return { approve: false, reason: "post_verdicts is false" };
+  if (truncated) return { approve: false, reason: "too many threads to check them all" };
   if (!review) return { approve: false, reason: "no open review from the bot" };
   const root = thread.comments.nodes[0];
   if (root.pullRequestReview?.databaseId !== review.id) {
@@ -124,7 +131,7 @@ export function footer(model, verdict, marker) {
 }
 
 export async function reply({ api, job, cfg, log, slug, apiKey }) {
-  const { headRefOid, threads } = await fetchThreads(api.graphql, job.repo, job.pr);
+  const { threads } = await fetchThreads(api.graphql, job.repo, job.pr);
   const thread = findThread(threads, job.thread);
   const reason = skipReason(thread, slug);
   if (reason) {
@@ -145,24 +152,29 @@ export async function reply({ api, job, cfg, log, slug, apiKey }) {
   });
 
   const marker = value.resolved ? `\n\n${SETTLED_MARKER}` : "";
-  const body = `${value.reply}\n\n<sub>review-bot, model ${model}</sub>${marker}`;
+  // The model must not be able to mark a thread settled by writing the marker itself.
+  const text = value.reply.replaceAll(SETTLED_MARKER, "").trim();
+  const body = `${text}\n\n<sub>review-bot, model ${model}</sub>${marker}`;
   await api.post(`/repos/${job.repo}/pulls/${job.pr}/comments/${job.thread}/replies`, { body });
   log(`reply: posted, resolved=${value.resolved}`);
   if (!value.resolved) return;
 
   await api.graphql(RESOLVE_MUTATION, { id: thread.id }).catch((e) => log(`reply: resolve failed: ${e.message}`));
 
+  // Re-read after posting: a reply in another thread of the same review may
+  // have settled it while the model was thinking.
+  const fresh = await fetchThreads(api.graphql, job.repo, job.pr);
   const reviews = await api.paginate(`/repos/${job.repo}/pulls/${job.pr}/reviews`);
   const review = latestBotReview(reviews, slug);
-  const decision = shouldApprove({ review, threads, thread, slug, headRefOid, postVerdicts: cfg.post_verdicts });
+  const decision = shouldApprove({ review, threads: fresh.threads, thread, slug, headRefOid: fresh.headRefOid, postVerdicts: cfg.post_verdicts, truncated: fresh.truncated });
   if (!decision.approve) {
     log(`reply: not approving (${decision.reason})`);
     return;
   }
 
-  const headMarker = `<!-- review-bot head=${headRefOid} -->`;
+  const headMarker = `<!-- review-bot head=${fresh.headRefOid} -->`;
   await api.post(`/repos/${job.repo}/pulls/${job.pr}/reviews`, {
-    commit_id: headRefOid,
+    commit_id: fresh.headRefOid,
     event: "APPROVE",
     body: `All points from the last review are settled in the threads.\n\n${footer(model, "approve", headMarker)}`,
   });

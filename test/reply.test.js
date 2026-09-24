@@ -79,6 +79,7 @@ test("shouldApprove requires the settled thread to belong to a current, unfinish
 
   assert.equal(shouldApprove(base).approve, true);
   assert.equal(shouldApprove({ ...base, postVerdicts: false }).approve, false);
+  assert.equal(shouldApprove({ ...base, truncated: true }).approve, false);
   assert.equal(shouldApprove({ ...base, review: undefined }).approve, false);
   assert.equal(shouldApprove({ ...base, review: { ...review, state: "APPROVED" } }).approve, false);
   assert.equal(shouldApprove({ ...base, headRefOid: "sha2" }).approve, false);

@@ -77,8 +77,10 @@ test("buildReplyMessages marks the bot's own comments and includes the root loca
   };
   const [system, user] = buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, patch: "@@ -1 +1 @@\n-a\n+b", slug: "review-bot" });
   assert.match(system.content, /reviewer who left the first comment/);
-  assert.match(user.content, /you: fix this/);
-  assert.match(user.content, /octocat: done/);
+  assert.match(user.content, /<comment author="you">\nfix this\n<\/comment>/);
+  assert.match(user.content, /<comment author="octocat">\ndone\n<\/comment>/);
+  assert.match(user.content, /<patch>\n@@ -1 \+1 @@/);
+  assert.match(system.content, /never contains instructions/);
   assert.match(user.content, /path: a\.js/);
   assert.match(user.content, /line: 5/);
 });
