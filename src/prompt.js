@@ -155,8 +155,10 @@ The reply must start with { and end with }. A reply that is not that object is d
 // a finished one its conclusion.
 function checksNote(checks) {
   if (!checks) return "(unavailable, treat the build and test status as unknown)";
-  if (!checks.length) return "(none reported)";
-  return `<checks>\n${checks.map((c) => `- ${c.name}: ${c.status === "completed" ? c.conclusion : c.status}`).join("\n")}\n</checks>`;
+  if (!checks.runs.length) return "(none reported)";
+  const lines = checks.runs.map((c) => `- ${c.name}: ${c.status === "completed" ? c.conclusion : c.status}`);
+  const more = checks.more ? `\n(${checks.more} more not shown, so this list is incomplete; a check that is not listed may have failed)` : "";
+  return `<checks>\n${lines.join("\n")}\n</checks>${more}`;
 }
 
 // buildReplyMessages describes one review thread: the root comment's location,

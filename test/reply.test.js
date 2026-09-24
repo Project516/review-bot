@@ -91,14 +91,14 @@ test("footer names the model, verdict and carries the marker", () => {
   assert.equal(footer("m/x", "approve", "<!-- review-bot head=sha -->"), "---\n<sub>review-bot, model m/x, verdict approve</sub>\n<!-- review-bot head=sha -->");
 });
 
-test("fetchChecks keeps name, status and conclusion, and is null when the checks cannot be read", async () => {
+test("fetchChecks keeps name, status and conclusion, counts runs past the first page, and is null when the checks cannot be read", async () => {
   const api = {
     get: async (path) => {
       assert.equal(path, "/repos/o/r/commits/abc/check-runs?per_page=100");
-      return { check_runs: [{ name: "build", status: "completed", conclusion: "success", id: 9 }] };
+      return { total_count: 101, check_runs: [{ name: "build", status: "completed", conclusion: "success", id: 9 }] };
     },
   };
-  assert.deepEqual(await fetchChecks(api, "o/r", "abc", () => {}), [{ name: "build", status: "completed", conclusion: "success" }]);
+  assert.deepEqual(await fetchChecks(api, "o/r", "abc", () => {}), { runs: [{ name: "build", status: "completed", conclusion: "success" }], more: 100 });
   const lines = [];
   const denied = { get: async () => { throw new Error("403"); } };
   assert.equal(await fetchChecks(denied, "o/r", "abc", (l) => lines.push(l)), null);

@@ -131,13 +131,15 @@ export function footer(model, verdict, marker) {
   return `---\n<sub>review-bot, model ${model}, verdict ${verdict}</sub>\n${marker}`;
 }
 
-// fetchChecks lists the check runs on a commit as { name, status, conclusion },
-// or null when they cannot be read, so the model is told they are unknown
-// rather than that nothing ran.
+// fetchChecks lists the first page of check runs on a commit as
+// { runs: [{ name, status, conclusion }], more }, where more counts the runs
+// past that page, or null when they cannot be read, so the model is told they
+// are unknown rather than that nothing ran.
 export async function fetchChecks(api, repo, sha, log) {
   try {
     const res = await api.get(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`);
-    return res.check_runs.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion }));
+    const runs = res.check_runs.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion }));
+    return { runs, more: Math.max(0, res.total_count - runs.length) };
   } catch (e) {
     log(`reply: checks unavailable: ${e.message}`);
     return null;
