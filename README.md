@@ -82,7 +82,7 @@ the bot already covered. Draft PRs wait until they are marked ready.
 ### Replies
 
 Reply to one of the bot's inline review comments and, if you are the owner or
-an allowed author, it reads the thread and answers: it concedes when the fix
+an allowed author, it reads the thread and the whole PR diff at head, then answers: it concedes when the fix
 landed or your pushback is right, or pushes back with its reasoning. A
 conceded reply resolves the thread, and once every thread from the bot's last
 `REQUEST_CHANGES` review is settled that way, it approves the PR so the
