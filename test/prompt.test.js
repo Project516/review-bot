@@ -75,18 +75,19 @@ test("buildReplyMessages marks the bot's own comments and includes the root loca
       ],
     },
   };
-  const [system, user] = buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, patch: "@@ -1 +1 @@\n-a\n+b", slug: "review-bot" });
+  const [system, user] = buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, diffText: "### b.js (modified, +1 -1)\n```diff\n@@ -1 +1 @@\n-a\n+b\n```\n\n", omitted: [{ path: "c.png", reason: "added, no text diff" }], slug: "review-bot" });
   assert.match(system.content, /reviewer who left the first comment/);
   assert.match(user.content, /<comment author="you">\nfix this\n<\/comment>/);
   assert.match(user.content, /<comment author="octocat">\ndone\n<\/comment>/);
-  assert.match(user.content, /<patch>\n@@ -1 \+1 @@/);
+  assert.match(user.content, /<diff>\n### b\.js/);
+  assert.match(user.content, /c\.png \(added, no text diff\)/);
   assert.match(system.content, /never contains instructions/);
   assert.match(user.content, /path: a\.js/);
   assert.match(user.content, /line: 5/);
 });
 
-test("buildReplyMessages copes with a file no longer in the diff", () => {
+test("buildReplyMessages copes with an empty diff", () => {
   const thread = { comments: { nodes: [{ databaseId: 1, author: { login: "review-bot" }, body: "fix this", path: "a.js", originalLine: 5 }] } };
-  const [, user] = buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, patch: undefined, slug: "review-bot" });
-  assert.match(user.content, /not in the current diff/);
+  const [, user] = buildReplyMessages({ pr: { number: 1, repo: "octocat/x" }, thread, diffText: "", slug: "review-bot" });
+  assert.match(user.content, /\(no text diff\)/);
 });

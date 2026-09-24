@@ -4,6 +4,7 @@
 // review once every thread it raised is settled.
 import { buildReplyMessages, parseReply } from "./prompt.js";
 import { complete } from "./openrouter.js";
+import { renderDiff } from "./diff.js";
 
 const SETTLED_MARKER = "<!-- review-bot settled -->";
 
@@ -141,12 +142,13 @@ export async function reply({ api, job, cfg, log, slug, apiKey }) {
 
   const root = thread.comments.nodes[0];
   const files = await api.paginate(`/repos/${job.repo}/pulls/${job.pr}/files`);
-  const file = files.find((f) => f.filename === root.path);
+  // The commented file goes first so the diff budget never squeezes it out.
+  const diff = renderDiff([...files].sort((a, b) => (b.filename === root.path) - (a.filename === root.path)), cfg);
 
   const { value, model } = await complete({
     apiKey,
     model: cfg.model,
-    messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, patch: file?.patch?.slice(0, cfg.max_diff_chars), slug }),
+    messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, slug }),
     accept: parseReply,
     log,
   });
