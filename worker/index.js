@@ -1,8 +1,9 @@
 // Webhook relay. GitHub posts every event here; the Worker checks the
-// signature, keeps only the events that can lead to a review, and forwards a
-// small job to the review repo as a repository_dispatch. The review itself
-// runs in GitHub Actions, because a free-plan Worker has 10 ms of CPU and
-// 30 seconds of background time, and free models are slower than that.
+// signature, keeps only the events that can lead to a review or a reply on a
+// review thread, and forwards a small job to the review repo as a
+// repository_dispatch. The review itself runs in GitHub Actions, because a
+// free-plan Worker has 10 ms of CPU and 30 seconds of background time, and
+// free models are slower than that.
 
 const PR_ACTIONS = new Set(["opened", "reopened", "synchronize", "ready_for_review"]);
 
@@ -67,6 +68,22 @@ export function pick(event, p) {
       author: p.issue.user.login,
       sender: p.comment.user.login,
       comment_id: p.comment.id,
+    };
+  }
+  if (
+    event === "pull_request_review_comment" &&
+    p.action === "created" &&
+    p.comment.in_reply_to_id != null &&
+    p.sender?.type !== "Bot"
+  ) {
+    return {
+      ...base,
+      event,
+      pr: p.pull_request.number,
+      author: p.pull_request.user.login,
+      sender: p.comment.user.login,
+      comment_id: p.comment.id,
+      thread: p.comment.in_reply_to_id,
     };
   }
   return null;

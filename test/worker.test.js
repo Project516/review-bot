@@ -30,6 +30,23 @@ test("verify accepts a good signature and rejects bad ones", async () => {
   assert.equal(await verify("s3cret", null, body), false);
 });
 
+test("pick forwards replies to the bot's review comments, not human threads or bot senders", () => {
+  const p = {
+    ...repo,
+    action: "created",
+    pull_request: { number: 4, user: { login: "octocat" } },
+    comment: { id: 22, in_reply_to_id: 11, user: { login: "helper-bot" } },
+    sender: { login: "helper-bot", type: "User" },
+  };
+  assert.deepEqual(pick("pull_request_review_comment", p), {
+    repo: "octocat/x", installation: 7, action: "created", event: "pull_request_review_comment",
+    pr: 4, author: "octocat", sender: "helper-bot", comment_id: 22, thread: 11,
+  });
+  assert.equal(pick("pull_request_review_comment", { ...p, comment: { ...p.comment, in_reply_to_id: undefined } }), null);
+  assert.equal(pick("pull_request_review_comment", { ...p, sender: { login: "review-bot", type: "Bot" } }), null);
+  assert.equal(pick("pull_request_review_comment", { ...p, action: "edited" }), null);
+});
+
 test("allowedOwner keeps listed owners and drops everyone else", () => {
   assert.equal(allowedOwner("octocat,OtherOrg", "OCTOCAT/x"), true);
   assert.equal(allowedOwner("octocat, OtherOrg", "otherorg/y"), true);

@@ -284,7 +284,7 @@ step "GitHub App name: something unique, e.g. <you>-review-bot. Homepage URL: th
 step "Webhook: Active. Webhook URL: $WEBHOOK_URL"
 step "Webhook secret: $WEBHOOK_SECRET"
 step "Repository permissions: Contents Read-only; Issues Read and write; Pull requests Read and write. (Metadata is added automatically.)"
-step "Subscribe to events: Issue comment, Pull request."
+step "Subscribe to events: Issue comment, Pull request, Pull request review comment."
 step "Where can this GitHub App be installed: Any account. An org you own counts as another account, so this is the only setting that lets the bot run on org repos."
 note "allowed_repo_owners is what keeps it yours: the Worker drops webhooks from any other owner before they cost a run."
 step "Create GitHub App. On the next page copy the App ID (top of the General tab)."

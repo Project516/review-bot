@@ -23,5 +23,12 @@ export function decide(job, cfg) {
     return { review: true, forced: false, reason: `${job.action} by allowed author ${job.author}` };
   }
 
+  if (job.event === "pull_request_review_comment") {
+    if (!same(job.sender, cfg.owner) && !listed(cfg.allowed_authors, job.sender)) {
+      return skip(`reply from ${job.sender} is not allowed`);
+    }
+    return { review: true, forced: false, reply: true, reason: `reply from ${job.sender}` };
+  }
+
   return skip(`unhandled event ${job.event}`);
 }

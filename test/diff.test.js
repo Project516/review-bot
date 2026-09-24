@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ignored, validLines, renderDiff } from "../src/diff.js";
+import { ignored, validLines, renderDiff, splitComments } from "../src/diff.js";
 
 test("ignored matches names, suffixes and directories", () => {
   const pats = ["pnpm-lock.yaml", "*.snap", "dist/"];
@@ -43,4 +43,26 @@ test("renderDiff skips ignored and binary files and honours the budget", () => {
     ["pnpm-lock.yaml", "logo.png", "big.js"],
   );
   assert.ok(text.length <= 200);
+});
+
+test("splitComments separates inline from stray comments", () => {
+  const valid = new Map([["a.js", new Set([1, 2])]]);
+  const comments = [
+    { path: "a.js", line: 1, body: "fix this" },
+    { path: "a.js", line: 99, body: "not in the diff" },
+    { path: "b.js", line: 1, body: "unknown file" },
+  ];
+  const { inline, stray, dropped } = splitComments(comments, valid, "comment");
+  assert.deepEqual(inline, [{ path: "a.js", line: 1, side: "RIGHT", body: "fix this" }]);
+  assert.deepEqual(stray, [comments[1], comments[2]]);
+  assert.equal(dropped, 0);
+});
+
+test("splitComments drops everything on an approve verdict", () => {
+  const valid = new Map([["a.js", new Set([1])]]);
+  const comments = [{ path: "a.js", line: 1, body: "nice job" }];
+  const { inline, stray, dropped } = splitComments(comments, valid, "approve");
+  assert.deepEqual(inline, []);
+  assert.deepEqual(stray, []);
+  assert.equal(dropped, 1);
 });

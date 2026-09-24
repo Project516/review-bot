@@ -37,9 +37,11 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
 - `src/review.js` entry point run by `.github/workflows/review.yml`.
 - `src/log.js` the log redactor. `src/config.js` `reviewbot.json` plus the
   policy secret. `src/policy.js` who gets reviewed. `src/diff.js` patch parsing and budget.
-  `src/prompt.js` model prompt and lenient JSON parsing. `src/github.js` App
-  JWT, installation token, tiny REST client. `src/openrouter.js` completion
-  with retries.
+  `src/prompt.js` model prompts and lenient JSON parsing. `src/github.js` App
+  JWT, installation token, tiny REST and GraphQL client. `src/openrouter.js`
+  completion with retries. `src/reply.js` answers a reply on one of the bot's
+  review threads, and approves the PR once every thread from the last
+  `REQUEST_CHANGES` review is settled.
 - `test/` `node --test` suites for everything that does not need the network.
 - `scripts/setup.sh` human setup wizard, kept because setup repeats on a fresh
   account.
@@ -56,8 +58,8 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
 ## Glossary
 
 - **job**: the small object the Worker dispatches (`repo`, `pr`, `installation`,
-  `event`, `action`, `author`, `sender`, `draft`, `comment_id`, `ref`). The reviewer
-  decides from it and from the loaded config alone.
+  `event`, `action`, `author`, `sender`, `draft`, `comment_id`, `ref`, `thread`).
+  The reviewer decides from it and from the loaded config alone.
 - **owner**: the single login in `REVIEWBOT_POLICY` that may issue `/review`.
 - **allowed author**: a login whose PRs get reviewed automatically.
 - **forced review**: a review requested with `/review`. Skips the author list
@@ -69,3 +71,7 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   used to avoid reviewing the same head commit twice.
 - **stray comment**: a model comment whose path or line is not in the diff.
   It is listed in the review body under "Other notes" instead of inline.
+- **settled**: a bot review thread whose latest bot reply carries the
+  `<!-- review-bot settled -->` marker, meaning the concern is dropped from
+  future reviews and, once every thread from the same review is settled,
+  clears that review's `REQUEST_CHANGES`.
