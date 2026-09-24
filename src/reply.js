@@ -1,7 +1,8 @@
 // Answers a reply on one of the bot's own inline review comments: read the
 // thread, ask the model whether the concern still stands, post the reply,
-// and when it is settled, resolve the thread and lift a CHANGES_REQUESTED
-// review once every thread it raised is settled.
+// and lift a CHANGES_REQUESTED review once every thread it raised is settled.
+// It does not resolve threads: the GraphQL mutation needs Contents write,
+// which the App does not hold. The settled marker is the state that counts.
 import { buildReplyMessages, parseReply } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { renderDiff } from "./diff.js";
@@ -39,8 +40,6 @@ query($owner: String!, $name: String!, $number: Int!) {
     }
   }
 }`;
-
-const RESOLVE_MUTATION = `mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
 
 export async function fetchThreads(graphql, repo, pr) {
   const [owner, name] = repo.split("/");
@@ -160,8 +159,6 @@ export async function reply({ api, job, cfg, log, slug, apiKey }) {
   await api.post(`/repos/${job.repo}/pulls/${job.pr}/comments/${job.thread}/replies`, { body });
   log(`reply: posted, resolved=${value.resolved}`);
   if (!value.resolved) return;
-
-  await api.graphql(RESOLVE_MUTATION, { id: thread.id }).catch((e) => log(`reply: resolve failed: ${e.message}`));
 
   // Re-read after posting: a reply in another thread of the same review may
   // have settled it while the model was thinking.
