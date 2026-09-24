@@ -1,12 +1,14 @@
 // Entry point for the Actions job. Reads the job the Worker dispatched from
-// EVENT_JSON, applies reviewbot.json, and posts one review on the PR.
+// EVENT_JSON, applies reviewbot.json, and posts one review on the PR, or, for
+// a reply job, hands off to reply.js.
 import { loadConfig, requireEnv } from "./config.js";
 import { decide } from "./policy.js";
-import { client, installationToken, GitHubError } from "./github.js";
-import { renderDiff, validLines } from "./diff.js";
+import { client, installationToken, appSlug, GitHubError } from "./github.js";
+import { renderDiff, validLines, splitComments } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { redactor } from "./log.js";
+import { reply, fetchThreads, isSettled, footer } from "./reply.js";
 
 // Set once the job is parsed, so the top-level failure handler can scrub too.
 let scrub = String;
@@ -23,10 +25,20 @@ async function main() {
   log(`decision: ${decision.review ? "review" : "skip"} (${decision.reason})`);
   if (!decision.review) return;
 
-  const token = await installationToken(requireEnv("APP_ID"), requireEnv("APP_PRIVATE_KEY"), job.installation);
+  const appId = requireEnv("APP_ID");
+  const privateKey = requireEnv("APP_PRIVATE_KEY");
+  const token = await installationToken(appId, privateKey, job.installation);
   const api = client(token);
   const base = `/repos/${job.repo}`;
 
+  if (decision.reply) {
+    const slug = await appSlug(appId, privateKey);
+    await reply({ api, job, cfg, log, slug, apiKey: requireEnv("OPENROUTER_API_KEY") });
+    return;
+  }
+
+  // The eyes reaction only applies to a /review issue comment; a reply job's
+  // comment_id names a review comment, not an issue comment, and is handled above.
   if (job.comment_id) {
     await api.post(`${base}/issues/comments/${job.comment_id}/reactions`, { content: "eyes" }).catch((e) => log(`reaction failed: ${e.message}`));
   }
@@ -48,25 +60,31 @@ async function main() {
     return;
   }
 
+  let settled = [];
+  try {
+    const slug = await appSlug(appId, privateKey);
+    const { threads } = await fetchThreads(api.graphql, job.repo, job.pr);
+    settled = threads
+      .filter((t) => isSettled(t, slug))
+      .map((t) => ({ path: t.comments.nodes[0].path, body: t.comments.nodes[0].body }));
+  } catch (e) {
+    log(`settled points unavailable, reviewing without them: ${e.message}`);
+  }
+
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
     model: cfg.model,
-    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted }),
+    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled }),
     accept: parseReview,
     log,
   });
   log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
 
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
-  const inline = [];
-  const stray = [];
-  for (const c of review.comments) {
-    if (valid.get(c.path)?.has(c.line)) inline.push({ path: c.path, line: c.line, side: "RIGHT", body: c.body });
-    else stray.push(c);
-  }
+  const { inline, stray, dropped } = splitComments(review.comments, valid, review.verdict);
+  if (dropped) log(`approve: dropped ${dropped} comments`);
 
-  const footer = `---\n<sub>review-bot, model ${model}, verdict ${review.verdict}</sub>\n${marker}`;
-  const body = (extra) => [review.summary, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer].filter(Boolean).join("\n\n");
+  const body = (extra) => [review.summary, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
   const event = cfg.post_verdicts ? VERDICT_EVENT[review.verdict] : "COMMENT";
 
   try {

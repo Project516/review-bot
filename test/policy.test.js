@@ -27,3 +27,14 @@ test("/review by owner forces a review of anyone's PR", () => {
 test("/review by anyone else is ignored", () => {
   assert.equal(decide(pr({ event: "issue_comment", sender: "helper-bot" }), cfg).review, false);
 });
+
+test("a reply from the owner or an allowed author is answered", () => {
+  const fromOwner = decide(pr({ event: "pull_request_review_comment", sender: "OCTOCAT", thread: 5 }), cfg);
+  assert.deepEqual([fromOwner.review, fromOwner.reply], [true, true]);
+  const fromAllowed = decide(pr({ event: "pull_request_review_comment", sender: "helper-bot", thread: 5 }), cfg);
+  assert.deepEqual([fromAllowed.review, fromAllowed.reply], [true, true]);
+});
+
+test("a reply from anyone else is skipped", () => {
+  assert.equal(decide(pr({ event: "pull_request_review_comment", sender: "someone", thread: 5 }), cfg).review, false);
+});

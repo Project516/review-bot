@@ -15,6 +15,15 @@ export async function installationToken(appId, privateKey, installationId) {
   return res.token;
 }
 
+// appSlug is the App's own login, without the "[bot]" suffix REST puts on it.
+// GraphQL reports a bot author's login as the bare slug, so callers that
+// compare against both APIs need this to build "${slug}[bot]" for REST.
+export async function appSlug(appId, privateKey) {
+  const app = client(appJwt(appId, privateKey));
+  const res = await app.get("/app");
+  return res.slug;
+}
+
 export class GitHubError extends Error {
   constructor(status, method, path, body) {
     super(`GitHub ${method} ${path} -> ${status}: ${body}`);
@@ -22,21 +31,18 @@ export class GitHubError extends Error {
   }
 }
 
-// client returns a tiny REST helper bound to one token.
+// client returns a tiny REST and GraphQL helper bound to one token.
 export function client(token) {
+  const headers = (body) => ({
+    authorization: `Bearer ${token}`,
+    accept: "application/vnd.github+json",
+    "user-agent": "review-bot",
+    "x-github-api-version": "2022-11-28",
+    ...(body ? { "content-type": "application/json" } : {}),
+  });
   async function call(method, path, body) {
     const url = path.startsWith("http") ? path : API + path;
-    const res = await fetch(url, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/vnd.github+json",
-        "user-agent": "review-bot",
-        "x-github-api-version": "2022-11-28",
-        ...(body ? { "content-type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    const res = await fetch(url, { method, headers: headers(body), body: body ? JSON.stringify(body) : undefined });
     if (!res.ok) throw new GitHubError(res.status, method, path, await res.text());
     return { data: res.status === 204 ? null : await res.json(), next: nextLink(res.headers.get("link")) };
   }
@@ -52,6 +58,14 @@ export function client(token) {
         url = next;
       }
       return out;
+    },
+    async graphql(query, variables) {
+      const res = await fetch(`${API}/graphql`, { method: "POST", headers: headers(true), body: JSON.stringify({ query, variables }) });
+      const body = await res.text();
+      if (!res.ok) throw new GitHubError(res.status, "POST", "/graphql", body);
+      const data = JSON.parse(body);
+      if (data.errors) throw new GitHubError(res.status, "POST", "/graphql", JSON.stringify(data.errors));
+      return data.data;
     },
   };
 }

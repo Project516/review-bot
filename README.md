@@ -79,6 +79,18 @@ PRs from anyone else are skipped with a reason in the Actions log. Comment
 with eyes so you know it heard. `/review` also forces a fresh review on a head
 the bot already covered. Draft PRs wait until they are marked ready.
 
+### Replies
+
+Reply to one of the bot's inline review comments and, if you are the owner or
+an allowed author, it reads the thread and answers: it concedes when the fix
+landed or your pushback is right, or pushes back with its reasoning. A
+conceded reply resolves the thread, and once every thread from the bot's last
+`REQUEST_CHANGES` review is settled that way, it approves the PR so the
+requested changes are lifted. After three replies in one thread without
+agreement it stops and leaves it for you. Replies from anyone else are
+skipped. The App needs the "Pull request review comment" webhook event for
+this to work; add it if you set the App up before this existed.
+
 ### Keeping it yours
 
 An App owned by a user account can only be installed on another account, an org

@@ -31,6 +31,20 @@ export function validLines(patch) {
   return lines;
 }
 
+// splitComments sorts model comments into inline (a real line in the diff)
+// and stray (everywhere else). An "approve" verdict gets no comments at all:
+// nothing is posted, and dropped counts what would have been.
+export function splitComments(comments, valid, verdict) {
+  if (verdict === "approve") return { inline: [], stray: [], dropped: comments.length };
+  const inline = [];
+  const stray = [];
+  for (const c of comments) {
+    if (valid.get(c.path)?.has(c.line)) inline.push({ path: c.path, line: c.line, side: "RIGHT", body: c.body });
+    else stray.push(c);
+  }
+  return { inline, stray, dropped: 0 };
+}
+
 // renderDiff produces the markdown the model reads plus the list of files it
 // did not get to see and why.
 export function renderDiff(files, { ignore_paths = [], max_diff_chars = 60000 } = {}) {
