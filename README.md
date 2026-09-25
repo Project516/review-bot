@@ -101,7 +101,7 @@ worker` workflow.
 | key | meaning |
 | --- | --- |
 | `models` | OpenRouter model ids, tried in order, one per attempt. Never the `openrouter/` routers, which are a fallback, not a pin |
-| `model_selection` | optional thresholds for the weekly re-pin: `pin` (how many to keep, default 5), `min_context`, `min_completion_tokens` |
+| `model_selection` | optional thresholds for the weekly re-pin: `pin` (how many to keep, default 5), `min_context`, `min_completion_tokens`, `excluded_ids` (ids never pinned or tried, for a model that qualifies but answers every request with an error the ranking has no way to see) |
 | `post_verdicts` | `false` posts everything as a comment review; `true` lets the model approve or request changes |
 | `max_diff_chars` | budget for the diff sent to the model; files past it are listed, not shown |
 | `max_facts_chars` | budget for the gathered facts; past it, base code is cut first and the cut files are named as a gap |

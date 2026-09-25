@@ -17,6 +17,7 @@ export const DEFAULTS = {
   pin: 5,
   min_context: 65536,
   min_completion_tokens: 16384,
+  excluded_ids: [],
 };
 
 // The router, held back for when every pin is dead. It is free, and it is the
@@ -68,7 +69,7 @@ function expired(m, now) {
 // rank splits the catalog into the models worth pinning, best first, and
 // everything else with the one reason it was left out.
 export function rank(models, cfg = {}, now = Date.now()) {
-  const { min_context, min_completion_tokens } = settings(cfg);
+  const { min_context, min_completion_tokens, excluded_ids } = settings(cfg);
   const ranked = [];
   const rejected = [];
   let free = 0;
@@ -88,6 +89,11 @@ export function rank(models, cfg = {}, now = Date.now()) {
     const id = text(m.id);
     const score = coding(m);
     const reason =
+      // Some models answer every non-agentic request with 403, gated to a
+      // harness OpenRouter names in the error body. Nothing in the catalog
+      // record marks that, so there is no ranking rule that catches it: a
+      // maintainer has to name the id by hand.
+      excluded_ids.includes(id) ? "excluded" :
       expired(m, now) ? "expired" :
       !speaksText(m) ? "not a text model" :
       score == null ? "no published coding score" :
