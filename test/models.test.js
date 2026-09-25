@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rank, planPins, compare, rotate, renderReport, renderPins, parseCatalog, settings, ROUTER } from "../src/models.js";
+import { rank, planPins, compare, rotate, renderReport, renderPins, parseCatalog, settings, ROUTER, carryOverNotes, withNotes, NOTES_HEADING } from "../src/models.js";
 
 // A catalog row shaped like the real one. score is the published coding index,
 // ctx and out the room to work.
@@ -167,4 +167,57 @@ test("the config must be a JSON object, and a broken one is a loud failure", () 
   assert.throws(() => renderPins("[1,2]", ["a:free"]), /not a JSON object/, "an array would stringify to something with no models key, dropping the pins");
   assert.throws(() => renderPins("null", ["a:free"]), /not a JSON object/);
   assert.equal(renderPins("{}", ["a:free"]), `${JSON.stringify({ models: ["a:free"] }, null, 2)}\n`, "an object with no models yet is fine, it gains one");
+});
+
+// The weekly job updates last week's PR in place, and a PR body update replaces
+// the whole body. Without care, a note a human left on that PR is gone by the
+// next run, and it is the one part of the body nobody automated wrote.
+
+// oneReport is a real body off the real fixture shape, so these tests read the
+// same text the weekly job would actually publish.
+const oneReport = () => {
+  const { ranked, rejected, free } = rank([model("a/best", { score: 70 }), model("b/second", { score: 60 }), model("c/third", { score: 50 })]);
+  const current = ["a/best:free", "x/departed:free"];
+  return renderReport({ ranked, rejected, current, change: compare(current, ranked, rejected), free, generated: "2026-09-25T07:17:00Z" });
+};
+
+test("a note a human left under its own heading survives the weekly update", () => {
+  const previous = `${oneReport()}\n${NOTES_HEADING}\n\nHeld off on qwen, it was 429 all week.`;
+  const notes = carryOverNotes(previous);
+  assert.match(notes, /Held off on qwen/, notes);
+  const next = withNotes(oneReport(), notes);
+  assert.match(next, /## Pinned/, "this week's ranking is still there");
+  assert.match(next, /Held off on qwen/, "and so is the note");
+  assert.ok(next.indexOf("## Pinned") < next.indexOf(NOTES_HEADING), "the note sits below this week's ranking");
+});
+
+test("a body the human rewrote whole is kept whole", () => {
+  // No bot section at all means a person replaced the body. Treating that as
+  // stale bot output would throw away exactly the text that was written by hand.
+  const previous = "I disagree with this order. Keeping the old pins until the rate limits settle.";
+  assert.equal(carryOverNotes(previous), previous.trim());
+});
+
+test("a body with no human note carries nothing over", () => {
+  assert.equal(carryOverNotes(oneReport()), null);
+  assert.equal(carryOverNotes(""), null);
+  assert.equal(carryOverNotes(null), null);
+});
+
+test("the bot never writes under the notes heading itself", () => {
+  // If the bot's own output landed under NOTES_HEADING it would be carried over
+  // as if a person had written it, and then pile up week after week.
+  const report = oneReport();
+  assert.ok(!report.includes(NOTES_HEADING), report);
+});
+
+test("the body says what the PR is and what to check before merging", () => {
+  // The body is the only thing a human reads before deciding, so it has to
+  // answer what this is and what a yes means, not just list model ids.
+  const body = oneReport();
+  assert.match(body, /## What this is/, body);
+  assert.match(body, /## Before you merge/, body);
+  assert.match(body, /reviewbot\.json/, "it names the one file that changes");
+  assert.match(body, /never merged on its own/, "it says a human decides");
+  assert.ok(!/[—]/.test(body), "no em dashes");
 });

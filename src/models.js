@@ -171,6 +171,38 @@ export function compare(current = [], ranked = [], rejected = [], cfg = {}) {
   };
 }
 
+// NOTES_HEADING is where carried-over human notes go. The bot never writes a
+// line under it, so the two never argue.
+export const NOTES_HEADING = "## Your notes on last week";
+
+const BOT_SECTIONS = ["## What this is", "## Before you merge", "## This week", "## Pinned", "## Next in line", "## No longer free", "## Left out", "## Was pinned"];
+
+// carryOverNotes returns what a human wrote on the previous PR body, with the
+// bot's own sections removed, or null when there was nothing of theirs.
+//
+// The weekly job updates last week's PR in place rather than opening a second
+// one, and updating a PR body is a whole-body replace. Without this, a note
+// anyone left on that PR would be gone by the next run, and the note is the one
+// part of the body a person wrote.
+export function carryOverNotes(previous) {
+  if (!previous?.trim()) return null;
+  const start = previous.indexOf(NOTES_HEADING);
+  const kept = start === -1 ? "" : previous.slice(start).trim();
+  // A body with none of the bot's sections is a human who replaced the whole
+  // thing. That is their text, so it is kept whole rather than treated as stale
+  // bot output, otherwise a person rewriting the body loses it.
+  const isOurs = BOT_SECTIONS.some((h) => previous.includes(h));
+  if (!isOurs) return previous.trim();
+  return kept || null;
+}
+
+// withNotes appends the carried notes under a heading of their own, so this
+// week's ranking reads cleanly and the older note is visibly not part of it.
+export function withNotes(body, notes) {
+  if (!notes) return body;
+  return `${body}\n${NOTES_HEADING}\n\n${notes.replace(NOTES_HEADING, "").trim()}\n`;
+}
+
 // renderReport is the PR body: the ranking, the runners-up, and every model
 // left out with the reason, so the human can overrule the order on sight.
 export function renderReport({ ranked, rejected, current = [], change, cfg = {}, free, generated = new Date().toISOString() }) {
@@ -179,9 +211,17 @@ export function renderReport({ ranked, rejected, current = [], change, cfg = {},
   const lines = [];
   const list = (items) => items.map((i) => `- \`${i.id}\``).join("\n");
 
-  lines.push("Weekly pick of free models, ranked by the coding score OpenRouter publishes for them. Nobody merged this: look at the order and change it if you disagree.");
+  lines.push("## What this is");
+  lines.push("Opened automatically by the weekly refresh, once a week, and never merged on its own. The only edit is the `models` list in `reviewbot.json`: which free models the reviewer tries, in order, before falling back to the `openrouter/free` router.");
+  lines.push("No code changes. If the order here is wrong, edit the list by hand and merge, and next week starts from your order instead of this one.");
+  lines.push("## Before you merge");
+  lines.push("- Does the top of the list look like something you want answering code reviews? That is the whole judgement. The score is OpenRouter's, not a benchmark run here.");
+  lines.push("- Anything in **No longer free** needs deleting even if the rest looks fine, or the reviewer keeps spending an attempt on a dead name.");
+  lines.push("- A week where nothing changed opens no PR, so silence means the pins still match.");
+  lines.push("## This week");
   lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${pin} pinned.`);
   lines.push(`A pin must be free, read and write text, have a published coding score, hold at least ${min_context} tokens of context, and allow ${min_completion_tokens} output tokens. Unbenchmarked models are left out: that is where the content-safety classifiers and the tiny models are.`);
+  lines.push("Ranked by the coding score OpenRouter publishes. Nobody merged this: look at the order and change it if you disagree.");
   lines.push("## Pinned");
   lines.push(ranked.length ? list(ranked.slice(0, pin)) : "Nothing on the free list qualifies this week. The reviewer falls back to the free router until the next run.");
   if (rest.length) {

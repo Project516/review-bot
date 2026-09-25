@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "./config.js";
-import { fetchCatalog, rank, planPins, compare, renderReport, renderPins, settings } from "./models.js";
+import { fetchCatalog, rank, planPins, compare, renderReport, renderPins, settings, carryOverNotes, withNotes } from "./models.js";
 
 const CONFIG_PATH = new URL("../reviewbot.json", import.meta.url);
 const BRANCH = "models/weekly-pins";
@@ -106,6 +106,12 @@ function saveReport(body) {
   }
 }
 
+// openPullRequest opens the weekly PR, or updates the one already open from a
+// previous week rather than stacking a second, so there is only ever one to look
+// at.
+//
+// The update is a PATCH of the whole body, which would wipe anything a human
+// wrote on last week's PR, so their part is carried over by carryOverNotes.
 async function openPullRequest({ body, change }) {
   const [owner, repo] = (process.env.GITHUB_REPOSITORY ?? "/").split("/");
   if (!process.env.GITHUB_TOKEN) throw new Error("GITHUB_TOKEN is needed to open the refresh PR");
@@ -118,8 +124,10 @@ async function openPullRequest({ body, change }) {
   // second one, so there is only ever one PR to look at.
   const existing = await api("GET", `/repos/${owner}/${repo}/pulls?state=open&head=${owner}:${BRANCH}`);
   if (existing.length) {
-    await api("PATCH", `/repos/${owner}/${repo}/pulls/${existing[0].number}`, { title, body });
-    log(`updated open PR #${existing[0].number}: ${title}`);
+    const previous = (await api("GET", `/repos/${owner}/${repo}/pulls/${existing[0].number}`))?.body ?? "";
+    const carried = carryOverNotes(previous);
+    await api("PATCH", `/repos/${owner}/${repo}/pulls/${existing[0].number}`, { title, body: withNotes(body, carried) });
+    log(`updated open PR #${existing[0].number}: ${title}${carried ? " (kept your notes)" : ""}`);
     return existing[0].html_url;
   }
   const pr = await api("POST", `/repos/${owner}/${repo}/pulls`, { title, body, head: BRANCH, base: "master" });
