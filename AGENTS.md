@@ -37,7 +37,10 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
 - `src/review.js` entry point run by `.github/workflows/review.yml`.
 - `src/log.js` the log redactor. `src/config.js` `reviewbot.json` plus the
   policy secret. `src/policy.js` who gets reviewed. `src/diff.js` patch parsing and budget.
-  `src/prompt.js` model prompts and lenient JSON parsing. `src/github.js` App
+  `src/prompt.js` model prompts, lenient JSON parsing, and the house style
+  applied to model text. `src/style.js` rewrites the long dashes out of a
+  review before it is published. `src/facts.js` gathers what the model cannot
+  fetch for itself. `src/github.js` App
   JWT, installation token, tiny REST and GraphQL client. `src/openrouter.js`
   completion with retries. `src/reply.js` answers a reply on one of the bot's
   review threads, and approves the PR once every thread from the last
