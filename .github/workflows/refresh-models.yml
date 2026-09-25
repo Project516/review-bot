@@ -23,6 +23,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # This job branches off origin/master and pushes from there, so it needs
+          # the history rather than the one commit checkout fetches by default.
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24

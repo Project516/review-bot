@@ -144,7 +144,10 @@ export function renderPins(text, models) {
 export function rotate(current = [], ranked = [], cfg = {}) {
   const seen = new Set();
   const out = [];
-  for (const id of [...current, ...planPins(ranked, cfg), ...ranked.map((r) => (typeof r === "string" ? r : r.id))]) {
+  // The whole ranked list, not just the pins: the pins are the first few entries
+  // of it, so spreading planPins as well would only duplicate them for the seen
+  // set to drop.
+  for (const id of [...current, ...ranked.map((r) => (typeof r === "string" ? r : r.id))]) {
     const id_ = text(id);
     if (!id_ || id_ === ROUTER || seen.has(id_)) continue;
     seen.add(id_);
