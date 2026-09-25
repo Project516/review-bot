@@ -70,25 +70,57 @@ test("pins the top of the ranking and nothing more", () => {
 });
 
 test("a pin that left the free list is reported apart from one that ranked lower", () => {
-  // c/gone is still in the catalog but no longer free, d/vanished is gone from
-  // the catalog entirely, and e/lower is free and fine, it just ranked out of
-  // the top of the list.
+  // Four ways a pin can stop being a pin, and the report has to tell them apart
+  // because only two of them cost the reviewer an attempt:
+  //
+  //   c/repriced  still in the catalog, now costs money  -> gone
+  //   d/vanished  not in the catalog at all              -> gone
+  //   e/unscored  still free, but no published score     -> outranked
+  //   f/small     still free, but too little context     -> outranked
+  //
+  // The last two are working models that simply did not make the cut. Filing
+  // them under "no longer free" would tell a human to delete a model that is
+  // fine, and would title the weekly PR "left the free list" about models that
+  // are on it.
+  // repriced keeps its :free id and loses its price, which is the only way a
+  // pin can genuinely leave the free list.
+  const repriced = model("c/repriced", { score: 70 });
+  repriced.pricing = { prompt: "0.0005", completion: "0.0015" };
   const { ranked, rejected } = rank([
     model("a/stays", { score: 70 }),
     model("b/also-stays", { score: 60 }),
-    model("c/gone", { score: null }),
-    model("e/lower", { score: 40 }),
+    repriced,
+    model("e/unscored", { score: null }),
+    model("f/small", { score: 65, ctx: 1024 }),
   ]);
-  const change = compare(["a/stays:free", "c/gone:free", "d/vanished:free", "e/lower:free"], ranked, rejected, { model_selection: { pin: 2 } });
+  const change = compare(
+    ["a/stays:free", "c/repriced:free", "d/vanished:free", "e/unscored:free", "f/small:free"],
+    ranked,
+    rejected,
+    { model_selection: { pin: 2 } },
+  );
   assert.deepEqual(change.desired, ["a/stays:free", "b/also-stays:free"]);
   assert.deepEqual(change.kept, ["a/stays:free"]);
   assert.deepEqual(change.added, ["b/also-stays:free"]);
   assert.deepEqual(change.gone, [
-    { id: "c/gone:free", reason: "no published coding score" },
+    { id: "c/repriced:free", reason: "no longer free" },
     { id: "d/vanished:free", reason: "no longer in the catalog" },
   ]);
-  assert.deepEqual(change.dropped, ["e/lower:free"], "a model that is still free and merely ranked lower is not reported as gone");
+  assert.deepEqual(change.outranked, [
+    { id: "e/unscored:free", reason: "no published coding score" },
+    { id: "f/small:free", reason: "context under 65536" },
+  ]);
+  assert.deepEqual(change.dropped, ["e/unscored:free", "f/small:free"], "they did fall out of the pins, which is not the same as being gone");
   assert.equal(change.changed, true);
+});
+
+test("the report tells a human not to delete a model that merely ranked out", () => {
+  const { ranked, rejected } = rank([model("a/stays", { score: 70 }), model("b/low", { score: null })]);
+  const change = compare(["a/stays:free", "b/low:free"], ranked, rejected, { model_selection: { pin: 1 } });
+  const body = renderReport({ ranked, rejected, current: ["a/stays:free", "b/low:free"], change, cfg: { model_selection: { pin: 1 } }, free: 2 });
+  assert.ok(body.includes("## Out of the pins this week"), body);
+  assert.match(body, /Nothing to delete/, "the demoted model must not read as broken");
+  assert.ok(!/## No longer free/.test(body), "a demotion is not a departure");
 });
 
 test("a ranking that matches the pins is not a change", () => {

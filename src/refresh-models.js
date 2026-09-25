@@ -60,14 +60,19 @@ export function dropRunnersUp(text) {
   return withRunnersUp(text, []);
 }
 
+// resetToMaster puts the tree on a fresh branch off master. Always from master,
+// so a week that reorders the pins never carries last week's commit on top of
+// it. It runs before the config is read, so the ranking and the commit are
+// planned from the same tree.
+function resetToMaster() {
+  git("config", "user.name", "review-bot");
+  git("config", "user.email", "review-bot@users.noreply.github.com");
+  git("checkout", "-B", BRANCH, "origin/master");
+}
+
 // The commit names no account and no repo, and the author is the bot's own
 // identity so the history does not carry anyone's name.
 function commitAndPush({ current, desired, change }) {
-  git("config", "user.name", "review-bot");
-  git("config", "user.email", "review-bot@users.noreply.github.com");
-  // Always start from master, so a week that reorders the pins never carries
-  // last week's commit on top of it.
-  git("checkout", "-B", BRANCH, "origin/master");
   git("add", "reviewbot.json");
 
   const gone = change.gone.map((g) => ` \`${g.id}\``).join("");
@@ -84,22 +89,36 @@ function commitAndPush({ current, desired, change }) {
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run") || process.env.DRY_RUN === "1";
+  // The working tree is the branch everything below reads and writes, so it is
+  // reset to master before the config is loaded rather than inside the commit
+  // step. Otherwise a leftover edit from a previous run would be ranked and
+  // then thrown away, and the pins would be planned from a tree the commit does
+  // not match.
+  resetToMaster();
   const cfg = loadConfig();
   const current = Array.isArray(cfg.models) ? cfg.models : [];
   const { pin } = settings(cfg);
+  const currentRunners = Array.isArray(cfg[RUNNERS_KEY]) ? cfg[RUNNERS_KEY] : [];
 
   const catalog = await fetchCatalog({ log });
   const { ranked, rejected, free } = rank(catalog, cfg);
   const change = compare(current, ranked, rejected, cfg);
   const desired = planPins(ranked, cfg);
+  const desiredRunners = ranked.slice(pin).map((r) => r.id);
+  // The runners-up are half of what this job writes, and a review run reads
+  // them, so a week that only reshuffles them is still a change. Checking the
+  // pins alone left the job silent on a week that reorders the fallback list,
+  // which is exactly the week the runners-up exist to record.
+  const runnersChanged = desiredRunners.join() !== currentRunners.join();
 
   log(`free models: ${free}, rankable: ${ranked.length}, pinning ${pin}`);
   for (const r of ranked) log(`  ${String(r.coding).padStart(5)}  ${r.id}  ctx ${r.context}`);
   for (const g of change.gone) log(`  GONE: ${g.id} (${g.reason})`);
+  for (const o of change.outranked) log(`  out of the pins this week: ${o.id} (${o.reason})`);
 
   const body = renderReport({ ranked, rejected, current, change, cfg, free });
-  if (!change.changed) {
-    log("this week's ranking matches the pins, nothing to open");
+  if (!change.changed && !runnersChanged) {
+    log("this week's ranking matches the pins and the runners-up, nothing to open");
     if (!dryRun) saveReport(body);
     return;
   }

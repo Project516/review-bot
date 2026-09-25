@@ -158,14 +158,21 @@ export function rotate(current = [], ranked = [], cfg = {}) {
 }
 
 // compare reads the change off the current pins: which stay, which arrive,
-// which fall off the end, and which are no longer free at all. A pin that has
+// which fall off the end, and which are no longer usable at all. A pin that has
 // left the free list is the failure this module exists to catch, so it is
 // reported separately from a pin that merely ranked lower this week.
+//
+// A pin that is still free but now fails a quality threshold is neither. It
+// still works, it is still free, and the reason it fell out is that it is too
+// small or unbenchmarked this week, not that it went away. Putting it under
+// "no longer free" would tell a human to delete a model that is fine, and
+// title the PR "left the free list" about a model that is on it.
 export function compare(current = [], ranked = [], rejected = [], cfg = {}) {
   const desired = planPins(ranked, cfg);
   const known = new Set(ranked.map((r) => r.id));
   const gone = [];
   const missing = [];
+  const outranked = [];
   for (const id of current) {
     if (known.has(id)) continue;
     // A pin is gone either because it is still in the catalog but no longer
@@ -173,8 +180,13 @@ export function compare(current = [], ranked = [], rejected = [], cfg = {}) {
     // worth naming a reason for; the second is the common case when a model is
     // retired outright. Either way it steps out of the pins.
     const why = rejected.find((r) => r.id === id);
-    if (why) gone.push({ id, reason: why.reason });
-    else missing.push({ id, reason: "no longer in the catalog" });
+    if (why) {
+      // A rejection for being free but unqualified is a demotion, not a
+      // departure. The run never spent an attempt proving it wrong, so it does
+      // not belong in the section that says a model wasted an attempt.
+      if (why.reason === "no longer free") gone.push({ id, reason: why.reason });
+      else outranked.push({ id, reason: why.reason });
+    } else missing.push({ id, reason: "no longer in the catalog" });
   }
   const goneIds = new Set([...gone, ...missing].map((g) => g.id));
   return {
@@ -184,6 +196,7 @@ export function compare(current = [], ranked = [], rejected = [], cfg = {}) {
     added: desired.filter((id) => !current.includes(id)),
     dropped: current.filter((id) => !desired.includes(id) && !goneIds.has(id)),
     gone: [...gone, ...missing],
+    outranked,
   };
 }
 
@@ -250,6 +263,11 @@ export function renderReport({ ranked, rejected, current = [], change, cfg = {},
     lines.push("## No longer free");
     lines.push("A pin here is dead weight: the reviewer burns an attempt on it every run.");
     lines.push(list(change.gone));
+  }
+  if (change.outranked.length) {
+    lines.push("## Out of the pins this week");
+    lines.push("Still free and still working, just not good enough to be pinned this week. Nothing to delete; they stay on the list below and in Next in line.");
+    lines.push(list(change.outranked));
   }
   if (rejected.length) {
     lines.push("## Left out");

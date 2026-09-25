@@ -127,16 +127,19 @@ out are listed in the PR with the reason.
 
 The qualified models are sorted by coding score, then agentic score, then
 intelligence score, then context, and the top `model_selection.pin` (5 by
-default) become the pins. A run then tries the pins in that order, then
-`openrouter/free`. A pin that has left the catalog costs one wasted attempt, the
-model is dropped from the rest of that run, and the next pin takes over. The
-router is only reached when every pin is gone, which is the one case the free
-router cannot cause on its own.
+default) become the pins. A run then tries the pins in that order, then the
+runners-up the last refresh recorded, then `openrouter/free`. A pin that has
+left the catalog costs one wasted attempt, the model is dropped from the rest of
+that run, and the next name takes over. The router is only reached when every
+name ahead of it is gone, which is the one case the free router cannot cause on
+its own.
 
-The runners-up are shown in the PR so the order can be argued with, but a review
-run only ever sees the pins and the router. It does not fetch the catalog on the
-way to a review: a review should not depend on OpenRouter answering twice, and it
-should not pay a second round trip to discover a list that only changes weekly.
+The runners-up are written into `reviewbot.json` as `model_runners_up` and a
+review run reads them from there. It does not fetch the catalog on the way to a
+review: a review should not depend on OpenRouter answering twice, and it should
+not pay a second round trip to discover a list that only changes weekly. The key
+is absent until the first refresh run, and a review before then runs on the pins
+and the router alone.
 
 The workflow opens a pull request with the new order, and it is left open for
 you. It never pushes to master and never merges. Read the ranking, disagree if

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { withRunnersUp, dropRunnersUp, RUNNERS_KEY } from "../src/refresh-models.js";
-import { rotate, ROUTER } from "../src/models.js";
+import { rotate, planPins, ROUTER } from "../src/models.js";
 
 const CONFIG = new URL("../reviewbot.json", import.meta.url);
 
@@ -61,9 +61,11 @@ test("a review run uses the recorded runners-up between the pins and the router"
 
 test("a config with no runners-up key still runs, on the pins and the router", () => {
   // The key only appears after the first refresh run, so every review before then
-  // takes this path.
-  const config = JSON.parse(readFileSync(CONFIG, "utf8"));
-  assert.equal(RUNNERS_KEY in config, false, "not written yet on a fresh checkout");
+  // takes this path. The config is built here rather than read from
+  // reviewbot.json, because the first run that writes the key would otherwise
+  // turn this into a test of a checked-in file that changes under it.
+  const config = { models: ["a/pin:free", "b/pin:free"] };
+  assert.equal(RUNNERS_KEY in config, false, "the key is absent on a fresh checkout");
   const order = rotate(config.models, config[RUNNERS_KEY] ?? [], config);
   assert.deepEqual(order, [...config.models, ROUTER]);
 });
@@ -72,4 +74,25 @@ test("no name is tried twice when a spare duplicates a pin", () => {
   const order = rotate(["a/pin:free", "b/pin:free"], ["b/pin:free", "c/spare:free"]);
   assert.equal(new Set(order).size, order.length, "no repeats");
   assert.deepEqual(order, ["a/pin:free", "b/pin:free", "c/spare:free", ROUTER]);
+});
+
+test("a week that only reshuffles the runners-up is still a change", () => {
+  // The runners-up are half of what the job writes and a review run reads them,
+  // so a reorder there matters as much as a reorder among the pins. Checking the
+  // pins alone left the job silent on a week that changed the fallback list,
+  // which is the week the runners-up exist to record. The job compares the
+  // recorded list against this week's ranking before it decides to open a PR,
+  // so that is what is compared here rather than the file, which is overwritten
+  // either way.
+  const cfg = { model_selection: { pin: 2 } };
+  const ranked = [{ id: "a/pin:free" }, { id: "b/pin:free" }, { id: "c/spare:free" }, { id: "d/last:free" }];
+  const pinsUnchanged = () => planPins(ranked, cfg).join() === ["a/pin:free", "b/pin:free"].join();
+  const thisWeek = ranked.slice(2).map((r) => r.id);
+  const reordered = (list) => list.join() !== thisWeek.join();
+
+  assert.deepEqual(planPins(ranked, cfg), ["a/pin:free", "b/pin:free"]);
+  assert.equal(pinsUnchanged(), true, "the pins are identical in both weeks");
+  assert.equal(reordered(["d/last:free", "c/spare:free"]), true, "a reorder of the spares alone still has to open a PR");
+  assert.equal(reordered(["e/new:free", "d/last:free"]), true, "and so does a swap in which model is the spare");
+  assert.equal(reordered(thisWeek), false, "an identical week stays silent");
 });
