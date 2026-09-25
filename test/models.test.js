@@ -318,7 +318,7 @@ test("the free count counts the free models, and a pin that went paid is named",
     change: compare([], mixed.ranked, mixed.rejected),
     free: mixed.free,
   });
-  assert.match(paidBody, /1 free models, 1 of them big enough to review a PR, \d+ pinned\. 1 more are listed but cost money now\./, paidBody);
+  assert.match(paidBody, /1 free models, 1 of them big enough to review a PR, 1 pinned\. 1 more are listed but cost money now\./, paidBody);
 });
 
 test("the runners-up reach a review run instead of only the pins", () => {

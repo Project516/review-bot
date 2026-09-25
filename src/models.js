@@ -249,7 +249,7 @@ export function renderReport({ ranked, rejected, current = [], change, cfg = {},
   lines.push("- Anything in **No longer free** needs deleting even if the rest looks fine, or the reviewer keeps spending an attempt on a dead name.");
   lines.push("- A week where nothing changed opens no PR, so silence means the pins still match.");
   lines.push("## This week");
-  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${pin} pinned.${paid ? ` ${paid} more are listed but cost money now.` : ""}`);
+  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${Math.min(pin, ranked.length)} pinned.${paid ? ` ${paid} more are listed but cost money now.` : ""}`);
   lines.push(`A pin must be free, read and write text, have a published coding score, hold at least ${min_context} tokens of context, and allow ${min_completion_tokens} output tokens. Unbenchmarked models are left out: that is where the content-safety classifiers and the tiny models are.`);
   lines.push("Ranked by the coding score OpenRouter publishes. Nobody merged this: look at the order and change it if you disagree.");
   lines.push("## Pinned");
