@@ -7,6 +7,9 @@ on:
   repository_dispatch:
     types: [review-request]
 
+permissions:
+  contents: read
+
 concurrency:
   group: review-${{ github.event.client_payload.ref }}-${{ github.event.client_payload.pr }}-${{ github.event.client_payload.thread || 'review' }}
   cancel-in-progress: true
