@@ -22,7 +22,9 @@ test("ranks the free models that can actually review a PR, best coding score fir
     model("d/paid", { free: false, score: 99 }),
   ]);
   assert.deepEqual(ranked.map((r) => r.id), ["b/strong:free", "c/middle:free", "a/weak:free"]);
-  assert.equal(rejected.length, 0);
+  // A plain paid model is not a pin that went paid: its id never carried :free,
+  // so it has nothing to report.
+  assert.deepEqual(rejected, []);
   assert.equal(free, 3, "a paid model is not a free model");
 });
 
@@ -220,4 +222,76 @@ test("the body says what the PR is and what to check before merging", () => {
   assert.match(body, /reviewbot\.json/, "it names the one file that changes");
   assert.match(body, /never merged on its own/, "it says a human decides");
   assert.ok(!/[—]/.test(body), "no em dashes");
+});
+
+// Findings from the review the bot posted on this PR, each checked against the
+// code before being fixed.
+
+test("a pin that kept its :free id but stopped being free is reported as paid", () => {
+  // rank() skips anything that is not free, so a pin whose provider repriced it
+  // used to fall out of both lists and compare() called it "no longer in the
+  // catalog". Those read as the same thing on the PR, and they are not: one is a
+  // decision the provider made, the other is the model being retired.
+  const stillFree = model("a/pin", { score: 70 });
+  const repriced = model("x/repriced", { score: 80 });
+  repriced.pricing = { prompt: "0.0005", completion: "0.0015" }; // keeps the id, loses the price
+  const { ranked, rejected } = rank([stillFree, repriced]);
+  assert.deepEqual(ranked.map((r) => r.id), ["a/pin:free"]);
+  assert.deepEqual(rejected, [{ id: "x/repriced:free", reason: "no longer free" }]);
+});
+
+test("a paid model is not reported as a pin that went paid", () => {
+  // Its id never ended in :free, so no pin can have pointed at it. Filing all
+  // several hundred of those under "no longer free" buried the one that mattered:
+  // a real run listed 400 of them and the actual answer was lost in the noise.
+  const { rejected } = rank([model("a/pin", { score: 70 }), model("openai/something-paid", { free: false, score: 99 })]);
+  assert.deepEqual(rejected, []);
+});
+
+test("a model with no published output cap is left out, not treated as unlimited", () => {
+  // outputCap defaulted to Infinity here, so a model publishing no cap at all
+  // passed the output-token threshold on the strength of a missing field.
+  const noCap = model("a/nocap", { score: 90 });
+  delete noCap.top_provider.max_completion_tokens;
+  const { ranked, rejected } = rank([noCap]);
+  assert.deepEqual(ranked, []);
+  assert.match(rejected[0].reason, /output cap/);
+});
+
+test("the free count counts the free models, and a pin that went paid is named", () => {
+  // The counter was named "free models" in the PR body while including models it
+  // had just rejected, so the count and the "of them big enough" figure could not
+  // both be describing the same set.
+  const { ranked, rejected, free } = rank([
+    model("a/good", { score: 70 }),
+    model("b/also-good", { score: 60 }),
+    model("c/tiny", { ctx: 1024 }),
+  ]);
+  assert.equal(free, 3, "all three are priced at zero, and all three count as free");
+  assert.equal(ranked.length, 2, "one of them is too small to review a PR");
+  assert.deepEqual(rejected, [{ id: "c/tiny:free", reason: "context under 65536" }]);
+  const body = renderReport({ ranked, rejected, current: [], change: compare([], ranked, rejected), free });
+  assert.match(body, /3 free models, 2 of them big enough/, body);
+  assert.doesNotMatch(body, /cost money now/, "nothing here went paid yet");
+
+  // The case the extra sentence was added for: a :free id that stopped being free.
+  const repriced = model("d/repriced", { score: 95 });
+  repriced.pricing = { prompt: "0.001", completion: "0.002" };
+  const mixed = rank([model("a/good", { score: 70 }), repriced]);
+  assert.deepEqual(mixed.rejected, [{ id: "d/repriced:free", reason: "no longer free" }]);
+  const paidBody = renderReport({
+    ranked: mixed.ranked,
+    rejected: mixed.rejected,
+    current: [],
+    change: compare([], mixed.ranked, mixed.rejected),
+    free: mixed.free,
+  });
+  assert.match(paidBody, /1 free models, 1 of them big enough to review a PR, \d+ pinned\. 1 more are listed but cost money now\./, paidBody);
+});
+
+test("the runners-up reach a review run instead of only the pins", () => {
+  // rotate() has always accepted runners-up, but both call sites passed an empty
+  // array, so the fallback after a pin died was the router and nothing else.
+  const order = rotate(["a/pin:free", "b/pin:free"], ["c/spare:free", "d/spare:free"]);
+  assert.deepEqual(order, ["a/pin:free", "b/pin:free", "c/spare:free", "d/spare:free", ROUTER]);
 });

@@ -53,7 +53,11 @@ const speaksText = (m) => (m?.architecture?.input_modalities ?? []).includes("te
 const coding = (m) => num(m?.benchmarks?.artificial_analysis?.coding_index);
 const agentic = (m) => num(m?.benchmarks?.artificial_analysis?.agentic_index);
 const intelligence = (m) => num(m?.benchmarks?.artificial_analysis?.intelligence_index);
-const outputCap = (m) => num(m?.top_provider?.max_completion_tokens);
+// outputCap is the room the provider allows in one completion. A model that does
+// not publish the field is treated as zero, not as unlimited: absent data is not
+// evidence of a large cap, and a missing field that read as Infinity would wave
+// through a model with no room to answer.
+const outputCap = (m) => num(m?.top_provider?.max_completion_tokens) ?? 0;
 
 function expired(m, now) {
   if (m?.expiration_date == null) return false;
@@ -70,7 +74,16 @@ export function rank(models, cfg = {}, now = Date.now()) {
   let free = 0;
 
   for (const m of models) {
-    if (!isFree(m)) continue;
+    if (!isFree(m)) {
+      // Only a model whose id still carries the :free suffix but no longer prices
+      // at zero is worth naming. A paid model is not a pin that went paid: its id
+      // never ended in :free, so no pin can ever have referred to it, and filing
+      // all several hundred of them under "no longer free" buried the real answer.
+      const id = text(m.id);
+      if (!id.endsWith(":free")) continue;
+      rejected.push({ id, reason: "no longer free" });
+      continue;
+    }
     free++;
     const id = text(m.id);
     const score = coding(m);
@@ -79,7 +92,7 @@ export function rank(models, cfg = {}, now = Date.now()) {
       !speaksText(m) ? "not a text model" :
       score == null ? "no published coding score" :
       (num(m.context_length) ?? 0) < min_context ? `context under ${min_context}` :
-      (outputCap(m) ?? Infinity) < min_completion_tokens ? `output cap under ${min_completion_tokens}` :
+      outputCap(m) < min_completion_tokens ? `output cap under ${min_completion_tokens}` :
       null;
     if (reason) {
       rejected.push({ id, reason });
@@ -122,16 +135,16 @@ export function renderPins(text, models) {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-// rotate is the order a run actually tries: the pins in order, then the free
-// router. A pin that has left the catalog costs one wasted attempt, the client
-// drops it, and the next pin takes over. The ranked list is only here so a
-// caller that already has one, such as a test or a future cached run, can put
-// models behind the pins. review.js and reply.js pass none: a review should not
-// depend on a second OpenRouter call, and the pins are the whole rotation.
+// rotate is the order a run tries: the pins, then the runners-up the weekly
+// refresh recorded, then the free router. A pin that has left the catalog costs
+// one wasted attempt, the client drops it, and the next name takes over. The
+// runners-up come from the config rather than a fresh fetch, so a review never
+// makes a second OpenRouter call to discover its own fallback. Both plain names
+// and ranked rows are accepted.
 export function rotate(current = [], ranked = [], cfg = {}) {
   const seen = new Set();
   const out = [];
-  for (const id of [...current, ...planPins(ranked, cfg), ...ranked.map((r) => r.id)]) {
+  for (const id of [...current, ...planPins(ranked, cfg), ...ranked.map((r) => (typeof r === "string" ? r : r.id))]) {
     const id_ = text(id);
     if (!id_ || id_ === ROUTER || seen.has(id_)) continue;
     seen.add(id_);
@@ -208,6 +221,7 @@ export function withNotes(body, notes) {
 export function renderReport({ ranked, rejected, current = [], change, cfg = {}, free, generated = new Date().toISOString() }) {
   const { pin, min_context, min_completion_tokens } = settings(cfg);
   const rest = ranked.slice(pin);
+  const paid = rejected.filter((r) => r.reason === "no longer free").length;
   const lines = [];
   const list = (items) => items.map((i) => `- \`${i.id}\``).join("\n");
 
@@ -219,7 +233,7 @@ export function renderReport({ ranked, rejected, current = [], change, cfg = {},
   lines.push("- Anything in **No longer free** needs deleting even if the rest looks fine, or the reviewer keeps spending an attempt on a dead name.");
   lines.push("- A week where nothing changed opens no PR, so silence means the pins still match.");
   lines.push("## This week");
-  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${pin} pinned.`);
+  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${pin} pinned.${paid ? ` ${paid} more are listed but cost money now.` : ""}`);
   lines.push(`A pin must be free, read and write text, have a published coding score, hold at least ${min_context} tokens of context, and allow ${min_completion_tokens} output tokens. Unbenchmarked models are left out: that is where the content-safety classifiers and the tiny models are.`);
   lines.push("Ranked by the coding score OpenRouter publishes. Nobody merged this: look at the order and change it if you disagree.");
   lines.push("## Pinned");

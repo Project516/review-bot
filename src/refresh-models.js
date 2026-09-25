@@ -7,6 +7,7 @@
 // the catalog is model ids, which are public.
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { loadConfig } from "./config.js";
 import { fetchCatalog, rank, planPins, compare, renderReport, renderPins, settings, carryOverNotes, withNotes } from "./models.js";
 
@@ -19,16 +20,44 @@ const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 // The pins are written back into reviewbot.json in place, so a week with no
 // change produces no diff at all. renderPins does the parse, so this only
 // decides whether there is anything to write.
-function writePins(models) {
+function writePins(desired, ranked) {
+  // The pins are the list of names, and the runners-up are written beside them
+  // by the weekly refresh so a review run can use them without fetching the
+  // catalog. Both come from the same file, so they cannot drift apart.
   const text = readFileSync(CONFIG_PATH, "utf8");
-  const updated = renderPins(text, models);
+  const body = renderPins(text, desired);
+  const extras = ranked.slice(desired.length).map((r) => r.id);
+  const updated = extras.length ? withRunnersUp(body, extras) : dropRunnersUp(body);
   if (updated === text) {
     log("pins already current, no edit needed");
     return false;
   }
   writeFileSync(CONFIG_PATH, updated);
-  log(`pins written: ${models.join(", ")}`);
+  log(`pins written: ${desired.join(", ")}`);
+  if (extras.length) log(`runners-up recorded: ${extras.length}`);
   return true;
+}
+
+// RUNNERS_KEY is where the weekly refresh records the models that did not make
+// the cut. Without it a review run knows only the pins, so a pin that leaves the
+// free list has nothing to fall back on but the router.
+export const RUNNERS_KEY = "model_runners_up";
+
+// withRunnersUp records the runners-up without disturbing anything else in the
+// config, and drops the key when the list is empty so a stale list cannot
+// outlive the ranking that produced it.
+export function withRunnersUp(text, extras) {
+  const config = JSON.parse(text);
+  if (!extras.length) delete config[RUNNERS_KEY];
+  else config[RUNNERS_KEY] = extras;
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+// dropRunnersUp clears a list left by an earlier run when this week has no
+// runners-up to record, rather than keeping names that are no longer ranked.
+export function dropRunnersUp(text) {
+  if (!(RUNNERS_KEY in JSON.parse(text))) return text;
+  return withRunnersUp(text, []);
 }
 
 // The commit names no account and no repo, and the author is the bot's own
@@ -86,7 +115,7 @@ async function main() {
     return;
   }
 
-  writePins(desired);
+  writePins(desired, ranked);
   saveReport(body);
   commitAndPush({ current, desired, change });
   const url = await openPullRequest({ body, change });
@@ -155,7 +184,12 @@ async function api(method, path, body) {
   return data;
 }
 
-main().catch((e) => {
-  console.error(`[models] ${e?.stack ?? e}`);
-  process.exit(1);
-});
+// main runs on import only when this file is the entry point, so a test can
+// import the helpers above without the job starting, fetching a catalog and
+// writing the config as a side effect.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main().catch((e) => {
+    console.error(`[models] ${e?.stack ?? e}`);
+    process.exit(1);
+  });
+}

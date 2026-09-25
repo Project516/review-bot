@@ -109,7 +109,7 @@ async function main() {
 
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
-    models: rotate(cfg.models, [], cfg),
+    models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
     messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled, facts }),
     accept: parseReview,
     log,
