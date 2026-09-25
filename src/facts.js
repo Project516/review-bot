@@ -111,19 +111,53 @@ export function prFacts({ pr, files, baseRef }) {
   return lines.join("\n");
 }
 
+// The base version of a file is the fact the model cannot do without, so it gets
+// the larger share of the budget. Folder listings fill whatever it leaves, and
+// the checks and the description are set aside first because they are small and
+// the model leans on them hardest.
+const BASELINE_SHARE = 0.7;
+const PER_FILE_CHARS = 2000;
+
 // renderFacts is the block appended to the user message. It is labelled as
 // gathered facts, with the gaps named, so a model that finds nothing wrong
 // stops rather than inventing a problem to have something to say.
-export function renderFacts({ baseline, siblings, checks, pr, ignore_paths = [] }) {
+//
+// max_chars caps the whole block, because the model's context is the limit that
+// actually bites. A pull request touching thirty files would otherwise send more
+// base code than any pinned model can hold, and the request comes back 400 on
+// every one of them, so the run fails having spent its whole rotation. A
+// truncated review beats no review. Anything the cap leaves out is named in the
+// gaps line, the same as anything that could not be read, so a file that was cut
+// never reads as a file that was clean.
+export function renderFacts({ baseline, siblings, checks, pr, max_chars = 15000 }) {
+  const held = (checks ? checks.length : 0) + (pr ? pr.length : 0) + 400;
+  const codeBudget = Math.max(0, Math.floor((max_chars - held) * BASELINE_SHARE));
+  const readable = [...(baseline ?? [])].filter(([, text]) => text != null);
+  const perFile = Math.max(400, Math.min(PER_FILE_CHARS, Math.floor(codeBudget / Math.max(1, readable.length))));
+
   const parts = [];
-  for (const [path, text] of baseline ?? []) {
-    if (text == null) continue;
-    parts.push(`### ${path} as it is on the base branch\n\`\`\`\n${truncate(text, 4000)}\n\`\`\``);
+  const cut = [];
+  let spent = 0;
+  for (const [path, text] of readable) {
+    const block = `### ${path} as it is on the base branch\n\`\`\`\n${truncate(text, perFile)}\n\`\`\``;
+    if (spent + block.length > codeBudget) {
+      cut.push(path);
+      continue;
+    }
+    parts.push(block);
+    spent += block.length;
   }
+  const cutDirs = [];
   for (const [dir, names] of siblings ?? []) {
     if (dir.endsWith("/") || names == null) continue; // the added-names marker
     if (!names.length) continue;
-    parts.push(`### what else is in ${dir || "the repository root"} on the base branch\n${names.map((n) => `- ${n}`).join("\n")}`);
+    const block = `### what else is in ${dir || "the repository root"} on the base branch\n${names.map((n) => `- ${n}`).join("\n")}`;
+    if (spent + block.length > max_chars - held) {
+      cutDirs.push(dir);
+      continue;
+    }
+    parts.push(block);
+    spent += block.length;
   }
   if (checks) parts.push(`### checks at the head commit\n${checks}`);
   if (pr) parts.push(`### about this pull request\n${pr}`);
@@ -135,6 +169,8 @@ export function renderFacts({ baseline, siblings, checks, pr, ignore_paths = [] 
     "the base version of a file this pull request adds does not exist yet, so for those you get the names of what is beside them instead",
     missingBase.length ? `no base version available for: ${missingBase.join(", ")}` : null,
     missingDir.length ? `could not list: ${missingDir.map((d) => d || "the root").join(", ")}` : null,
+    cut.length ? `left out of this review to keep the prompt within what the model can hold: ${cut.join(", ")}` : null,
+    cutDirs.length ? `folders left out for the same reason: ${cutDirs.map((d) => d || "the root").join(", ")}` : null,
     "nothing here is the result of running the code, so behaviour claims still need to be reasoned about",
   ].filter(Boolean);
   return `## Facts gathered for this review\n\n${parts.join("\n\n")}\n\nWhat was not available: ${gaps.join("; ")}.`;

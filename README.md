@@ -59,7 +59,10 @@ on standard runners, so the reviews cost nothing however many run.
   commit. Whatever could not be gathered is named in the prompt, so a gap never
   reads as an all-clear. A model given only a diff tends to report a setting as
   wrong when something else in the repo already sets it that way, or to assert a
-  fact about the world it has no way of checking. This is what stops both.
+  fact about the world it has no way of checking. This is what stops both. The
+  block is budgeted too, because a pull request touching thirty files would
+  otherwise send more base code than the model can hold and the run would fail on
+  every model in the rotation instead of reviewing less.
 
 ## Who gets reviewed
 
@@ -93,6 +96,7 @@ worker` workflow.
 | `models` | OpenRouter model ids, tried in order, one per attempt |
 | `post_verdicts` | `false` posts everything as a comment review; `true` lets the model approve or request changes |
 | `max_diff_chars` | budget for the diff sent to the model; files past it are listed, not shown |
+| `max_facts_chars` | budget for the gathered facts; past it, base code is cut first and the cut files are named as a gap |
 | `ignore_paths` | exact names, `*.suffix`, or `dir/` prefixes to leave out |
 
 PRs from anyone else are skipped with a reason in the Actions log. Comment
