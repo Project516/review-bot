@@ -6,6 +6,9 @@ on:
     paths: [worker/**, .github/workflows/deploy-worker.yml]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
