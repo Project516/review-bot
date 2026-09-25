@@ -1,14 +1,9 @@
 import { readFileSync } from "node:fs";
 
-// Who the bot works for is not in this repo: this repo is public, and naming
-// the accounts and people it reviews would defeat the point of a private
-// review. reviewbot.json carries only settings that give nothing away, and the
-// REVIEWBOT_POLICY secret carries the identities:
-//
-//   {"owner":"you","allowed_repo_owners":["you","your-org"],"allowed_authors":["you"]}
-//
-// Without it the lists are empty and nothing is reviewed, which is the safe way
-// to be misconfigured.
+// Who the bot works for lives in the REVIEWBOT_POLICY secret, not in this public
+// repo: naming the accounts and people it reviews would defeat the point of a
+// private review. reviewbot.json carries only settings that give nothing away.
+// Without the secret the lists are empty and nothing is reviewed.
 const IDENTITY = { owner: "", allowed_repo_owners: [], allowed_authors: [] };
 
 export function loadConfig(path = new URL("../reviewbot.json", import.meta.url), env = process.env) {
