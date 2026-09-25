@@ -9,7 +9,8 @@ import { renderDiff, validLines, splitComments } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { redactor } from "./log.js";
-import { reply, fetchThreads, isSettled, footer } from "./reply.js";
+import { reply, fetchThreads, isSettled, footer, fetchChecks } from "./reply.js";
+import { baselineOf, siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
 
 // Set once the job is parsed, so the top-level failure handler can scrub too.
 let scrub = String;
@@ -89,10 +90,26 @@ async function main() {
     log(`settled points unavailable, reviewing without them: ${e.message}`);
   }
 
+  // The model sees a diff and nothing else, so a claim it cannot check from the
+  // diff comes out as a guess. Hand it the base version of the files it is
+  // commenting on, what else sits beside the ones it adds, and the check runs at
+  // head, so those guesses stop.
+  let facts = "";
+  try {
+    const baseline = await baselineOf(api, job.repo, pr.base.ref, files, cfg);
+    const siblings = await siblingsOf(api, job.repo, pr.base.ref, files, cfg);
+    const checks = checksBrief(await fetchChecks(api, job.repo, pr.head.sha, log));
+    facts = renderFacts({ baseline, siblings, checks, pr: prFacts({ pr, files, baseRef: pr.base.ref }) });
+    const shown = [...baseline.values()].filter((v) => v != null).length;
+    log(`facts: ${shown} base files read, ${[...siblings.keys()].filter((k) => !k.endsWith("/")).length} folders listed, checks ${checks ? "read" : "unavailable"}`);
+  } catch (e) {
+    log(`facts unavailable, reviewing on the diff alone: ${e.message}`);
+  }
+
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
     models: cfg.models,
-    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled }),
+    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled, facts }),
     accept: parseReview,
     log,
   });
