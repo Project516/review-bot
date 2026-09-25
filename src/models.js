@@ -141,7 +141,7 @@ export function renderPins(text, models) {
 // runners-up come from the config rather than a fresh fetch, so a review never
 // makes a second OpenRouter call to discover its own fallback. Both plain names
 // and ranked rows are accepted.
-export function rotate(current = [], ranked = [], cfg = {}) {
+export function rotate(current = [], ranked = []) {
   const seen = new Set();
   const out = [];
   // The whole ranked list, not just the pins: the pins are the first few entries
