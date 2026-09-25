@@ -130,8 +130,35 @@ test("the pull request describes itself, so a code and description mismatch is v
 });
 
 test("a long base file is truncated rather than filling the prompt", () => {
-  const big = "x".repeat(9000);
+  const big = "x".repeat(90000);
   const text = renderFacts({ baseline: new Map([["a.js", big]]) });
   assert.match(text, /\.\.\. \(truncated\)/);
   assert.ok(text.length < 6000, `kept it to ${text.length} chars`);
+});
+
+test("the whole block is capped, so a wide pull request cannot overrun the model", () => {
+  // The failure this prevents: a pull request touching many files sent more base
+  // code than any pinned model can hold, and the request came back 400 on every
+  // one of them, so the run failed having spent the whole rotation.
+  const baseline = new Map(Array.from({ length: 60 }, (_, i) => [`src/f${i}.js`, "x".repeat(20000)]));
+  const text = renderFacts({ baseline, checks: "- Test: success", pr: "files changed: 60", max_chars: 15000 });
+  assert.ok(text.length <= 16000, `held it to ${text.length} chars against a 15000 budget`);
+  assert.match(text, /### checks at the head commit/, "the checks survive the cap");
+  assert.match(text, /### about this pull request/, "the description survives the cap");
+});
+
+test("a file the cap left out is named as a gap, not silently dropped", () => {
+  const baseline = new Map(Array.from({ length: 40 }, (_, i) => [`src/f${i}.js`, "x".repeat(5000)]));
+  const text = renderFacts({ baseline, max_chars: 4000 });
+  assert.match(text, /left out of this review to keep the prompt within what the model can hold/);
+  const named = text.match(/left out of this review[^;]*/)[0];
+  assert.ok(named.includes("src/f"), "the paths it dropped are in the gaps line, so a cut file never reads as a clean one");
+});
+
+test("the cap is not a ceiling on a small pull request", () => {
+  const baseline = new Map([["src/a.js", "old a"], ["src/b.js", "old b"]]);
+  const text = renderFacts({ baseline, checks: "- Test: success", pr: "files changed: 2", max_chars: 15000 });
+  assert.match(text, /### src\/a\.js as it is on the base branch/);
+  assert.match(text, /### src\/b\.js as it is on the base branch/);
+  assert.ok(!/left out of this review/.test(text), "nothing was cut, so nothing is named");
 });

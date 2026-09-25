@@ -99,7 +99,7 @@ async function main() {
     const baseline = await baselineOf(api, job.repo, pr.base.ref, files, cfg);
     const siblings = await siblingsOf(api, job.repo, pr.base.ref, files, cfg);
     const checks = checksBrief(await fetchChecks(api, job.repo, pr.head.sha, log));
-    facts = renderFacts({ baseline, siblings, checks, pr: prFacts({ pr, files, baseRef: pr.base.ref }) });
+    facts = renderFacts({ baseline, siblings, checks, pr: prFacts({ pr, files, baseRef: pr.base.ref }), max_chars: cfg.max_facts_chars });
     const shown = [...baseline.values()].filter((v) => v != null).length;
     log(`facts: ${shown} base files read, ${[...siblings.keys()].filter((k) => !k.endsWith("/")).length} folders listed, checks ${checks ? "read" : "unavailable"}`);
   } catch (e) {
