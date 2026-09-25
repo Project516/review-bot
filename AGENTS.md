@@ -22,6 +22,12 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
 - A review must never be wrong about where it points. Inline comments are
   checked against the real diff and anything the model got wrong is moved into
   the review body rather than dropped or guessed.
+- A review must not guess about what it cannot see. The model gets a diff and
+  nothing else, so the prompt says so, and `src/facts.js` hands it what can be
+  gathered: the base version of each changed file, the names of what sits beside
+  a file the PR adds, and the check runs at head. A gap is named in the prompt,
+  so a silence never reads as an all-clear. Nothing in there is specific to one
+  repository or one language: this reviews whatever it is pointed at.
 - Fail loud in the Actions log, quiet on the PR. A skipped PR gets a log line,
   not a comment.
 - Only a parsed review is ever published. A reply that is working notes, a
@@ -44,7 +50,9 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   JWT, installation token, tiny REST and GraphQL client. `src/openrouter.js`
   completion with retries. `src/reply.js` answers a reply on one of the bot's
   review threads, and approves the PR once every thread from the last
-  `REQUEST_CHANGES` review is settled.
+  `REQUEST_CHANGES` review is settled. `src/facts.js` gathers what a review can
+  check instead of guess at: base versions of the changed files, the names beside
+  a file the PR adds, and the check runs at head.
 - `test/` `node --test` suites for everything that does not need the network.
 - `scripts/setup.sh` human setup wizard, kept because setup repeats on a fresh
   account.

@@ -52,6 +52,15 @@ on standard runners, so the reviews cost nothing however many run.
   the parse layer, so it covers the summary, every comment and every thread
   reply.
 
+- **A review is given facts, not just a diff.** The model cannot read the rest of
+  the repo, run anything, or look anything up, so `src/facts.js` gathers what it
+  can reach: the base version of each changed file, the names of what already
+  sits in a folder when the PR adds a file there, and the check runs at the head
+  commit. Whatever could not be gathered is named in the prompt, so a gap never
+  reads as an all-clear. A model given only a diff tends to report a setting as
+  wrong when something else in the repo already sets it that way, or to assert a
+  fact about the world it has no way of checking. This is what stops both.
+
 ## Who gets reviewed
 
 Policy comes from two places. Who it works for is a secret; how it reviews is

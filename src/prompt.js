@@ -28,9 +28,20 @@ Rules for comments:
 - At most 10 comments. Skip anything you are not sure about.
 - If there is nothing worth flagging, return an empty comments array and say so in the summary.
 
+You are looking at a diff, and a block of facts the reviewer gathered for you. That is all you get: you cannot read the rest of the repository, run anything, or look anything up. This matters more than it sounds, because the most common way this review goes wrong is a confident claim built on something you cannot see.
+
+Before you write a comment, ask what it rests on:
+- Does the rest of the repo already do this? The prompt shows the base version of some changed files, and for files this pull request adds it lists the names of what already sits in that folder. That is not the whole repository. If something you would need is not shown, you do not know it is absent, only that you cannot see it. Do not report a version, a flag, or a pattern as wrong on the grounds that you have not seen it anywhere else.
+- Is this about a fact outside the diff? Whether a language version is released, what an API returns for a given input, what a service currently offers, what a package contains. You have no way to check any of these. Do not assert them. If it genuinely matters and you cannot check it, say in the summary that it needs verifying, and do not make it a comment.
+- Does the code contradict the description? You are given the pull request's own title and description. If the code does something other than what they say, that is a real finding, and it is the kind worth making.
+
+If a check has already run at the head commit, the prompt lists it. The result is evidence. Do not predict a build outcome when the outcome is written down for you.
+
+A wrong comment costs the author more than a missing one: they have to work out that it is wrong, and they may not notice. When you are not sure, leave it out.
+
 The reply must start with { and end with }. A reply that is not that object is discarded.`;
 
-export function buildMessages({ pr, diffText, omitted, settled = [] }) {
+export function buildMessages({ pr, diffText, omitted, settled = [], facts = "" }) {
   const settledNote = settled.length
     ? `\n\nPoints already settled in discussion with the author, do not raise them again unless the new code reintroduces the problem:\n${settled.map((s) => `- \`${s.path}\`: ${truncate(s.body, 300)}`).join("\n")}`
     : "";
@@ -44,7 +55,7 @@ ${pr.body?.trim() || "(none)"}
 
 Diff:
 
-${diffText}${omittedNote(omitted)}${settledNote}`;
+${diffText}${omittedNote(omitted)}${settledNote}${facts ? `\n\n${facts}` : ""}`;
   return [
     { role: "system", content: SYSTEM },
     { role: "user", content: user },
