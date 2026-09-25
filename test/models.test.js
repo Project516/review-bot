@@ -56,6 +56,18 @@ test("leaves out an image-only model and an expired one", () => {
   assert.deepEqual(rejected.map((r) => r.reason).sort(), ["expired", "not a text model"]);
 });
 
+test("a model named in excluded_ids is left out even though it qualifies", () => {
+  // Some models answer every request with a harness-only 403 that nothing in
+  // the catalog record marks, so a maintainer names the id by hand.
+  const { ranked, rejected, free } = rank(
+    [model("a/gated", { score: 95 }), model("b/fine", { score: 70 })],
+    { model_selection: { excluded_ids: ["a/gated:free"] } },
+  );
+  assert.deepEqual(ranked.map((r) => r.id), ["b/fine:free"]);
+  assert.deepEqual(rejected, [{ id: "a/gated:free", reason: "excluded" }]);
+  assert.equal(free, 2, "still counted as free, just excluded from the pins");
+});
+
 test("the order does not wobble when two models score the same", () => {
   const { ranked } = rank([model("b/twin", { score: 40 }), model("a/twin", { score: 40 })]);
   assert.deepEqual(ranked.map((r) => r.id), ["a/twin:free", "b/twin:free"]);
