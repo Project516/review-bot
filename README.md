@@ -27,17 +27,24 @@ listening. Nothing else needs a server:
   workflow, which fetches the diff with an installation token, asks OpenRouter,
   and posts the review. The PR being reviewed can be in any repo the App is
   installed on; the minutes are always spent here.
-- **OpenRouter free models.** `reviewbot.json` lists a few of the stronger
-  free models, and each attempt goes to the next one on the list. Free models
-  are rate limited (about 20 requests a minute and a daily cap that grows once
-  the account has had 10 dollars of credit). The client retries on 429 and
-  5xx, on a model that is gone from the free list, and whenever the reply is
-  not a review, so a retry is how the job gets off a model that is down or
-  thinks out loud. The `openrouter/free` router is not used: it hands some
-  requests to tiny models and safety classifiers, and a tiny model will
-  concede a point it should not. When a model leaves the free list, swap it
-  out; `curl -s https://openrouter.ai/api/v1/models` lists the current ones.
-  Only a parsed review is posted, so working notes cannot land on a PR.
+- **OpenRouter free models.** `reviewbot.json` pins a few of the stronger free
+  models, and each attempt goes to the next one on the list. Free models are
+  rate limited (about 20 requests a minute and a daily cap that grows once the
+  account has had 10 dollars of credit). The client retries on 429 and 5xx, on a
+  model that is gone from the free list, and whenever the reply is not a review,
+  so a retry is how the job gets off a model that is down or thinks out loud. A
+  model that answers 404 is dropped from the rest of that run, so a pin that
+  left the free list costs one attempt and not the whole run. The
+  `openrouter/free` router is held back as the last resort rather than used as
+  a pin: it hands some requests to tiny models and safety classifiers, and a
+  tiny model will concede a point it should not, so it only gets a run when
+  every pin is dead. Only a parsed review is posted, so working notes cannot
+  land on a PR.
+- **A weekly job that re-pins them.** The free list turns over, so the pins go
+  stale. `Refresh model pins` runs on Mondays, reads the OpenRouter catalog,
+  ranks the free models by the coding score OpenRouter publishes for them, and
+  opens a PR with the new order. It never pushes to master and never merges:
+  you read the ranking and decide. See [Which models it uses](#which-models-it-uses).
 
 No VPS. Oracle Cloud would work but is one more machine to keep alive for a
 job that runs a few times a day. A public repo gets unlimited Actions minutes
@@ -93,7 +100,8 @@ worker` workflow.
 
 | key | meaning |
 | --- | --- |
-| `models` | OpenRouter model ids, tried in order, one per attempt |
+| `models` | OpenRouter model ids, tried in order, one per attempt. Never the `openrouter/` routers, which are a fallback, not a pin |
+| `model_selection` | optional thresholds for the weekly re-pin: `pin` (how many to keep, default 5), `min_context`, `min_completion_tokens` |
 | `post_verdicts` | `false` posts everything as a comment review; `true` lets the model approve or request changes |
 | `max_diff_chars` | budget for the diff sent to the model; files past it are listed, not shown |
 | `max_facts_chars` | budget for the gathered facts; past it, base code is cut first and the cut files are named as a gap |
@@ -103,6 +111,36 @@ PRs from anyone else are skipped with a reason in the Actions log. Comment
 `/review` on the PR as the owner and it gets reviewed anyway; the bot reacts
 with eyes so you know it heard. `/review` also forces a fresh review on a head
 the bot already covered. Draft PRs wait until they are marked ready.
+
+### Which models it uses
+
+The pins in `reviewbot.json` are the models a run tries, one per attempt. The
+`Refresh model pins` workflow re-picks them every Monday, and here is how.
+
+It fetches `https://openrouter.ai/api/v1/models` and keeps the free models that
+could actually review a PR. A model qualifies when it is free, reads and writes
+text, has a coding score OpenRouter publishes, holds at least 65536 tokens of
+context, and allows at least 16384 output tokens. Unbenchmarked models are left
+out on purpose, because that is where the content-safety classifiers and the 2B
+models live, and those are what concede a point they should hold. The ones left
+out are listed in the PR with the reason.
+
+The qualified models are sorted by coding score, then agentic score, then
+intelligence score, then context, and the top `model_selection.pin` (5 by
+default) become the pins. A run then tries the pins in that order, and the
+ranked runners-up sit behind them, with the `openrouter/free` router last. That
+means a pin that has left the free list costs one wasted attempt, the next
+model takes over, and the router is only reached if every name is dead.
+
+The workflow opens a pull request with the new order, and it is left open for
+you. It never pushes to master and never merges. Read the ranking, disagree if
+you like, and merge it or edit it. A week where the ranking matches the pins
+opens nothing. Run it by hand any time with the `Refresh model pins` workflow,
+or look at the result without touching the repo:
+
+```bash
+DRY_RUN=1 node src/refresh-models.js
+```
 
 ### Replies
 

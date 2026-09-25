@@ -1,3 +1,5 @@
+import { ROUTER } from "./models.js";
+
 const URL = "https://openrouter.ai/api/v1/chat/completions";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -19,16 +21,40 @@ const NUDGE = {
 // replies that are not a review at all. Attempt i goes to models[i], wrapping
 // around, so a retry is also how we get off a model that is down, gone from
 // the free list, or thinking out loud.
-export async function complete({ apiKey, models, messages, accept = (t) => t, attempts = 5, backoff = 15000, log = console.log }) {
+//
+// models is the rotation from models.js: the pins in order, the ranked
+// runners-up behind them, and the free router last. attempts defaults to one
+// pass over the whole rotation, because a run that never reaches the router
+// cannot recover from every pin being dead at once. The client stops asking a
+// model for more once it has answered 404 or 400, so a run never wastes an
+// attempt on a model that has already left the free list.
+export async function complete({ apiKey, models, messages, accept = (t) => t, attempts, backoff = 15000, log = console.log }) {
+  if (!models?.length) throw new Error("no models to try");
+  const tries = attempts ?? Math.max(5, models.length);
+  const dead = new Set();
   let last = "no attempt made";
   let nudge = false;
-  for (let i = 0; i < attempts; i++) {
+  // The cursor walks the rotation and steps over anything this run has already
+  // proven dead, so the attempts a departed model would have taken go to the
+  // next live one. The wrap is the same as before: a live model comes round
+  // again if the rotation runs out before a review does.
+  let cursor = -1;
+  const nextLive = () => {
+    for (let hop = 0; hop < models.length; hop++) {
+      cursor = (cursor + 1) % models.length;
+      if (!dead.has(models[cursor])) return models[cursor];
+    }
+    return null;
+  };
+
+  for (let i = 0; i < tries; i++) {
     if (i) {
       const wait = backoff * i;
       log(`openrouter attempt ${i} failed (${last}), retrying in ${wait / 1000}s`);
       await sleep(wait);
     }
-    const model = models[i % models.length];
+    const model = nextLive();
+    if (!model) break;
     const res = await fetch(URL, {
       method: "POST",
       headers: {
@@ -46,18 +72,20 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
     });
     const body = await res.text();
     if (!res.ok) {
-      // Every status below is something the next model can answer differently.
-      // 400 and 404 are what a model that left the free list answers, or one
-      // that cannot take this prompt. 429 is a rate limit and clears.
-      //
-      // 403 belongs here too, and its absence killed a real run. OpenRouter
-      // answers 403 when a model is gated to agentic harnesses, naming the
-      // harness it wants. That is a fact about one model, not about the key, so
-      // it must not throw: throwing on it abandoned the review entirely, after
-      // three earlier attempts had already failed for unrelated reasons, and the
-      // log ended on a 403 that read like a permissions problem. Auth and credit
-      // errors still throw, since those fail the same way on every model.
+      // Every status below is something the next model can answer differently,
+      // so none of them ends the run. 400 and 404 are what a model that left the
+      // free list answers, or one that cannot take this prompt. 429 is a rate
+      // limit and clears. 403 is what OpenRouter answers for a model gated to
+      // agentic harnesses, naming the harness it wants, which is a fact about
+      // that one model and nothing to do with the key. Auth and credit errors
+      // still throw, since those fail the same way on every model.
       if (!RETRYABLE.includes(res.status) && res.status < 500) throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 500)}`);
+      // 404 means the id is gone for good and 400 usually means it is no longer
+      // free, so either way it will not answer later in this run either. It
+      // steps aside and the attempts it would have taken go to the next model.
+      // The router is exempt: a 400 from it is usually a limit that clears, and
+      // it is the only thing left when every pin is dead.
+      if (res.status === 404 || (res.status === 400 && model !== ROUTER)) dead.add(model);
       last = `${model} ${res.status}: ${body.slice(0, 300)}`;
       continue;
     }
@@ -79,5 +107,11 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
     last = `${picked} did not reply with a review (${text.length} chars)`;
     nudge = true;
   }
-  throw new Error(`OpenRouter gave up after ${attempts} attempts: ${last}`);
+  // Reaching here with every name dead is a real possibility when the free
+  // list turns over, so it names the rotation that was tried and says how many
+  // of them were gone, which is the thing worth reading in the log.
+  const gone = [...dead];
+  throw new Error(
+    `OpenRouter gave up after ${tries} attempts${gone.length ? `, ${gone.length} model(s) gone from the free list (${gone.join(", ")})` : ""}: ${last}`,
+  );
 }

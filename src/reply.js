@@ -6,6 +6,7 @@
 // is logged and changes nothing else.
 import { buildReplyMessages, parseReply } from "./prompt.js";
 import { complete } from "./openrouter.js";
+import { rotate } from "./models.js";
 import { renderDiff } from "./diff.js";
 
 const SETTLED_MARKER = "<!-- review-bot settled -->";
@@ -166,7 +167,7 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
 
   const { value, model } = await complete({
     apiKey,
-    models: cfg.models,
+    models: rotate(cfg.models, [], cfg),
     messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, checks, slug }),
     accept: parseReply,
     log,

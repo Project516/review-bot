@@ -1,0 +1,187 @@
+// Decides which free OpenRouter models the reviewer should be pointed at this
+// week, and says why.
+//
+// The free list turns over. A model pinned today can be gone tomorrow, and the
+// free router picks for itself, sometimes handing a review to a model small
+// enough to concede a point it should not hold. So the pins stay in
+// reviewbot.json, this module ranks what is on the free list right now, and the
+// weekly job re-runs the ranking and opens a PR. Nothing here edits the pins on
+// its own: a human looks at the ranking and merges.
+const CATALOG_URL = "https://openrouter.ai/api/v1/models";
+
+// A pin has to be free, read and write text, need a published coding score so
+// the choice is not a guess, and have room for a whole PR diff. A model with
+// no score is left out on purpose: the unbenchmarked tail of the free list is
+// where the content-safety classifiers and the 2B models live.
+export const DEFAULTS = {
+  pin: 5,
+  min_context: 65536,
+  min_completion_tokens: 16384,
+};
+
+// The router, held back for when every pin is dead. It is free, and it is the
+// one entry that has to be last: it is the fallback, not the plan.
+export const ROUTER = "openrouter/free";
+
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const text = (v) => (typeof v === "string" ? v : "");
+
+export const settings = (cfg = {}) => ({ ...DEFAULTS, ...(cfg.model_selection ?? {}) });
+
+// fetchCatalog is the one network read, and only the weekly job does it.
+export async function fetchCatalog({ url = CATALOG_URL, log = console.log } = {}) {
+  const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`OpenRouter catalog ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const models = parseCatalog(await res.text());
+  log(`catalog: ${models.length} models`);
+  return models;
+}
+
+export function parseCatalog(body) {
+  const data = typeof body === "string" ? JSON.parse(body) : body;
+  if (!Array.isArray(data?.data)) throw new Error("OpenRouter catalog is not a list of models");
+  return data.data;
+}
+
+const isFree = (m) => text(m.id).endsWith(":free") && Number(m?.pricing?.prompt) === 0 && Number(m?.pricing?.completion) === 0;
+const speaksText = (m) => (m?.architecture?.input_modalities ?? []).includes("text") && (m?.architecture?.output_modalities ?? []).includes("text");
+const coding = (m) => num(m?.benchmarks?.artificial_analysis?.coding_index);
+const agentic = (m) => num(m?.benchmarks?.artificial_analysis?.agentic_index);
+const intelligence = (m) => num(m?.benchmarks?.artificial_analysis?.intelligence_index);
+const outputCap = (m) => num(m?.top_provider?.max_completion_tokens);
+
+function expired(m, now) {
+  if (m?.expiration_date == null) return false;
+  const t = typeof m.expiration_date === "number" ? m.expiration_date * 1000 : Date.parse(m.expiration_date);
+  return Number.isFinite(t) && t <= now;
+}
+
+// rank splits the catalog into the models worth pinning, best first, and
+// everything else with the one reason it was left out.
+export function rank(models, cfg = {}, now = Date.now()) {
+  const { min_context, min_completion_tokens } = settings(cfg);
+  const ranked = [];
+  const rejected = [];
+  let free = 0;
+
+  for (const m of models) {
+    if (!isFree(m)) continue;
+    free++;
+    const id = text(m.id);
+    const score = coding(m);
+    const reason =
+      expired(m, now) ? "expired" :
+      !speaksText(m) ? "not a text model" :
+      score == null ? "no published coding score" :
+      (num(m.context_length) ?? 0) < min_context ? `context under ${min_context}` :
+      (outputCap(m) ?? Infinity) < min_completion_tokens ? `output cap under ${min_completion_tokens}` :
+      null;
+    if (reason) {
+      rejected.push({ id, reason });
+      continue;
+    }
+    ranked.push({
+      id,
+      coding: score,
+      agentic: agentic(m),
+      intelligence: intelligence(m),
+      context: num(m.context_length),
+      output_cap: outputCap(m),
+    });
+  }
+
+  // Coding score decides, then the agentic and intelligence scores, then the
+  // room to work, then the id so the order never wobbles between runs.
+  ranked.sort(
+    (a, b) => b.coding - a.coding || (b.agentic ?? -1) - (a.agentic ?? -1) || (b.intelligence ?? -1) - (a.intelligence ?? -1) || b.context - a.context || a.id.localeCompare(b.id),
+  );
+  return { ranked, rejected: rejected.sort((a, b) => a.id.localeCompare(b.id)), free };
+}
+
+export const planPins = (ranked, cfg = {}) => ranked.slice(0, settings(cfg).pin).map((r) => r.id);
+
+// rotate is the order a run actually tries: the pins in order, then any ranked
+// list it is handed, and the free router last. A pin that has left the free list
+// costs one wasted attempt and nothing else, and if somehow every name is dead
+// the router is still there. The review job passes no ranked list: refreshing it
+// is the weekly job's work, and the pins are what it was last given.
+export function rotate(current = [], ranked = [], cfg = {}) {
+  const seen = new Set();
+  const out = [];
+  for (const id of [...current, ...planPins(ranked, cfg), ...ranked.map((r) => r.id)]) {
+    const id_ = text(id);
+    if (!id_ || id_ === ROUTER || seen.has(id_)) continue;
+    seen.add(id_);
+    out.push(id_);
+  }
+  out.push(ROUTER);
+  return out;
+}
+
+// compare reads the change off the current pins: which stay, which arrive,
+// which fall off the end, and which are no longer free at all. A pin that has
+// left the free list is the failure this module exists to catch, so it is
+// reported separately from a pin that merely ranked lower this week.
+export function compare(current = [], ranked = [], rejected = [], cfg = {}) {
+  const desired = planPins(ranked, cfg);
+  const known = new Set(ranked.map((r) => r.id));
+  const gone = [];
+  const missing = [];
+  for (const id of current) {
+    if (known.has(id)) continue;
+    // A pin is gone either because it is still in the catalog but no longer
+    // free, or because it is not in the catalog at all. Only the first is
+    // worth naming a reason for; the second is the common case when a model is
+    // retired outright. Either way it steps out of the pins.
+    const why = rejected.find((r) => r.id === id);
+    if (why) gone.push({ id, reason: why.reason });
+    else missing.push({ id, reason: "no longer in the catalog" });
+  }
+  const goneIds = new Set([...gone, ...missing].map((g) => g.id));
+  return {
+    desired,
+    changed: desired.length !== current.length || desired.some((id, i) => id !== current[i]),
+    kept: desired.filter((id) => current.includes(id)),
+    added: desired.filter((id) => !current.includes(id)),
+    dropped: current.filter((id) => !desired.includes(id) && !goneIds.has(id)),
+    gone: [...gone, ...missing],
+  };
+}
+
+// renderReport is the PR body: the ranking, the runners-up, and every model
+// left out with the reason, so the human can overrule the order on sight.
+export function renderReport({ ranked, rejected, current = [], change, cfg = {}, free, generated = new Date().toISOString() }) {
+  const { pin, min_context, min_completion_tokens } = settings(cfg);
+  const rest = ranked.slice(pin);
+  const lines = [];
+  const list = (items) => items.map((i) => `- \`${i.id}\``).join("\n");
+
+  lines.push("Weekly pick of free models, ranked by the coding score OpenRouter publishes for them. Nobody merged this: look at the order and change it if you disagree.");
+  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${pin} pinned.`);
+  lines.push(`A pin must be free, read and write text, have a published coding score, hold at least ${min_context} tokens of context, and allow ${min_completion_tokens} output tokens. Unbenchmarked models are left out: that is where the content-safety classifiers and the tiny models are.`);
+  lines.push("## Pinned");
+  lines.push(ranked.length ? list(ranked.slice(0, pin)) : "Nothing on the free list qualifies this week. The reviewer falls back to the free router until the next run.");
+  if (rest.length) {
+    lines.push("## Next in line");
+    lines.push("These take over when a pin leaves the free list, and they are what the order is measured against.");
+    lines.push(list(rest));
+  }
+  if (change.gone.length) {
+    lines.push("## No longer free");
+    lines.push("A pin here is dead weight: the reviewer burns an attempt on it every run.");
+    lines.push(list(change.gone));
+  }
+  if (rejected.length) {
+    lines.push("## Left out");
+    const byReason = new Map();
+    for (const r of rejected) byReason.set(r.reason, [...(byReason.get(r.reason) ?? []), r.id]);
+    for (const [reason, ids] of byReason) lines.push(`- ${reason}: ${ids.map((id) => `\`${id}\``).join(", ")}`);
+  }
+  if (current.length) {
+    lines.push("## Was pinned");
+    lines.push(`- kept: ${change.kept.length ? change.kept.map((id) => `\`${id}\``).join(", ") : "none"}`);
+    lines.push(`- added: ${change.added.length ? change.added.map((id) => `\`${id}\``).join(", ") : "none"}`);
+    lines.push(`- ranked out: ${change.dropped.length ? change.dropped.map((id) => `\`${id}\``).join(", ") : "none"}`);
+  }
+  return lines.join("\n\n") + "\n";
+}
