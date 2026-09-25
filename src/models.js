@@ -29,8 +29,13 @@ const text = (v) => (typeof v === "string" ? v : "");
 export const settings = (cfg = {}) => ({ ...DEFAULTS, ...(cfg.model_selection ?? {}) });
 
 // fetchCatalog is the one network read, and only the weekly job does it.
-export async function fetchCatalog({ url = CATALOG_URL, log = console.log } = {}) {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
+export async function fetchCatalog({ url = CATALOG_URL, log = console.log, timeout = 30000 } = {}) {
+  const res = await fetch(url, {
+    headers: { accept: "application/json" },
+    // A stalled catalog read would otherwise hang the job until the workflow
+    // timeout.
+    signal: AbortSignal.timeout(timeout),
+  });
   if (!res.ok) throw new Error(`OpenRouter catalog ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const models = parseCatalog(await res.text());
   log(`catalog: ${models.length} models`);
@@ -100,11 +105,29 @@ export function rank(models, cfg = {}, now = Date.now()) {
 
 export const planPins = (ranked, cfg = {}) => ranked.slice(0, settings(cfg).pin).map((r) => r.id);
 
-// rotate is the order a run actually tries: the pins in order, then any ranked
-// list it is handed, and the free router last. A pin that has left the free list
-// costs one wasted attempt and nothing else, and if somehow every name is dead
-// the router is still there. The review job passes no ranked list: refreshing it
-// is the weekly job's work, and the pins are what it was last given.
+// renderPins returns the config text with the models replaced, or the text
+// unchanged when the pins are already current. Parsing and re-stringifying
+// rather than matching a pattern, so a key that looks like models but is not
+// one cannot be rewritten by accident, and the rest of the file keeps its own
+// shape. The caller does the writing, so this stays a pure function.
+export function renderPins(text, models) {
+  const config = JSON.parse(text);
+  // An array or a null here would stringify to something with no models key at
+  // all, quietly dropping the pins. That is a broken config, so it fails loud.
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("reviewbot.json is not a JSON object");
+  if (JSON.stringify(config.models) === JSON.stringify(models)) return text;
+  config.models = models;
+  // Two-space indent and a trailing newline match the file as checked in, so a
+  // week that only reorders the pins shows a diff of the models array alone.
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+// rotate is the order a run actually tries: the pins in order, then the free
+// router. A pin that has left the catalog costs one wasted attempt, the client
+// drops it, and the next pin takes over. The ranked list is only here so a
+// caller that already has one, such as a test or a future cached run, can put
+// models behind the pins. review.js and reply.js pass none: a review should not
+// depend on a second OpenRouter call, and the pins are the whole rotation.
 export function rotate(current = [], ranked = [], cfg = {}) {
   const seen = new Set();
   const out = [];

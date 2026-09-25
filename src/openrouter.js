@@ -1,5 +1,3 @@
-import { ROUTER } from "./models.js";
-
 const URL = "https://openrouter.ai/api/v1/chat/completions";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,6 +32,10 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
   const dead = new Set();
   let last = "no attempt made";
   let nudge = false;
+  // used counts the requests actually made, which is not tries: the loop stops
+  // early once every name is dead, and the log should say what happened rather
+  // than what was allowed.
+  let used = 0;
   // The cursor walks the rotation and steps over anything this run has already
   // proven dead, so the attempts a departed model would have taken go to the
   // next live one. The wrap is the same as before: a live model comes round
@@ -55,6 +57,7 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
     }
     const model = nextLive();
     if (!model) break;
+    used++;
     const res = await fetch(URL, {
       method: "POST",
       headers: {
@@ -80,12 +83,13 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
       // that one model and nothing to do with the key. Auth and credit errors
       // still throw, since those fail the same way on every model.
       if (!RETRYABLE.includes(res.status) && res.status < 500) throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 500)}`);
-      // 404 means the id is gone for good and 400 usually means it is no longer
-      // free, so either way it will not answer later in this run either. It
-      // steps aside and the attempts it would have taken go to the next model.
-      // The router is exempt: a 400 from it is usually a limit that clears, and
-      // it is the only thing left when every pin is dead.
-      if (res.status === 404 || (res.status === 400 && model !== ROUTER)) dead.add(model);
+      // 404 means the id is not in the catalog at all, which is the one answer
+      // that settles a model's fate for the rest of the run. A 400 is not: the
+      // docs call it a bad request, so it is usually this prompt, not this
+      // model (an unsupported param, or a diff too big for its window), and
+      // retiring the model on that would drop a good one for a request the next
+      // model will also reject. So 400 costs this attempt and nothing more.
+      if (res.status === 404) dead.add(model);
       last = `${model} ${res.status}: ${body.slice(0, 300)}`;
       continue;
     }
@@ -112,6 +116,6 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
   // of them were gone, which is the thing worth reading in the log.
   const gone = [...dead];
   throw new Error(
-    `OpenRouter gave up after ${tries} attempts${gone.length ? `, ${gone.length} model(s) gone from the free list (${gone.join(", ")})` : ""}: ${last}`,
+    `OpenRouter gave up after ${used} attempt${used === 1 ? "" : "s"}${gone.length ? `, ${gone.length} model(s) gone from the free list (${gone.join(", ")})` : ""}: ${last}`,
   );
 }

@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "./config.js";
-import { fetchCatalog, rank, planPins, compare, renderReport, settings } from "./models.js";
+import { fetchCatalog, rank, planPins, compare, renderReport, renderPins, settings } from "./models.js";
 
 const CONFIG_PATH = new URL("../reviewbot.json", import.meta.url);
 const BRANCH = "models/weekly-pins";
@@ -17,10 +17,11 @@ const log = (m) => console.log(`[models] ${m}`);
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 
 // The pins are written back into reviewbot.json in place, so a week with no
-// change produces no diff at all.
+// change produces no diff at all. renderPins does the parse, so this only
+// decides whether there is anything to write.
 function writePins(models) {
   const text = readFileSync(CONFIG_PATH, "utf8");
-  const updated = text.replace(/"models":\s*\[[\s\S]*?\]/, `"models": ${JSON.stringify(models, null, 2).replace(/\n/g, "\n  ")}`);
+  const updated = renderPins(text, models);
   if (updated === text) {
     log("pins already current, no edit needed");
     return false;
@@ -137,6 +138,9 @@ async function api(method, path, body) {
       "x-github-api-version": "2022-11-28",
     },
     body: body ? JSON.stringify(body) : undefined,
+    // A stalled request would otherwise hang the job until the workflow
+    // timeout, so every call here gives up in under a minute.
+    signal: AbortSignal.timeout(30000),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(`GitHub ${method} ${path} -> ${res.status}: ${JSON.stringify(data).slice(0, 400)}`);

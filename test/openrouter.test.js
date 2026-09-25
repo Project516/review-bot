@@ -79,19 +79,43 @@ test("a rate limit is not treated as the model being gone", async (t) => {
   assert.deepEqual(calls.map((c) => c.model), ["a", "b"], "a model that was rate limited is still live, so it comes round again");
 });
 
-test("the run is long enough to reach the router when every pin is dead", async (t) => {
+test("a bad request does not retire the model, because the prompt is what is wrong", async (t) => {
   const original = globalThis.fetch;
   t.after(() => (globalThis.fetch = original));
-  // Every pin is 404, and the router keeps answering 429, which is a limit that
-  // clears, so it stays in the rotation and the run keeps trying it. The
-  // failure names the pins that left the free list, which is the thing worth
-  // reading in the log.
-  const calls = stub([...Array(2).fill(0).map(() => new Response("gone", { status: 404 })), ...Array(3).fill(0).map(() => new Response("slow down", { status: 429 }))]);
+  // 400 is "invalid or missing params", so the same request would be rejected
+  // by every model. Retiring "a" on that would lose a good model for a request
+  // the next one will refuse too, so it only costs this attempt.
+  const calls = stub([new Response("unsupported param", { status: 400 }), new Response("unsupported param", { status: 400 }), reply("ok")]);
+  const { value } = await run((text) => (text === "ok" ? { text } : null));
+  assert.deepEqual(value, { text: "ok" });
+  assert.deepEqual(calls.map((c) => c.model), ["a", "b", "a"], "the 400 model comes back round, it was never written off");
+});
+
+test("the run reaches the router when every pin is gone from the catalog", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => (globalThis.fetch = original));
+  // Only 404 retires a model, so a pin that left the catalog steps aside and the
+  // router is reached. The failure names the pins that are gone, which is the
+  // thing worth reading in the log.
+  const calls = stub([...Array(2).fill(0).map(() => new Response("no such model", { status: 404 })), ...Array(3).fill(0).map(() => new Response("slow down", { status: 429 }))]);
   await assert.rejects(
     complete({ apiKey: "k", models: ["a", "b", "openrouter/free"], messages: [{ role: "user", content: "x" }], accept: () => null, backoff: 0, log: () => {} }),
     /gone from the free list \(a, b\)/,
   );
-  assert.deepEqual(calls.map((c) => c.model), ["a", "b", "openrouter/free", "openrouter/free", "openrouter/free"], "the router is reached after the dead pins and is never written off");
+  assert.deepEqual(calls.map((c) => c.model), ["a", "b", "openrouter/free", "openrouter/free", "openrouter/free"], "the router is reached after the gone pins and is never written off");
+});
+
+test("the failure reports the attempts actually made, not the allowance", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => (globalThis.fetch = original));
+  // Four names, every one 404, so the run stops after four requests even though
+  // it was allowed five. The message has to say four.
+  const calls = stub(Array.from({ length: 6 }, () => new Response("gone", { status: 404 })));
+  await assert.rejects(
+    complete({ apiKey: "k", models: ["a", "b", "c", "openrouter/free"], messages: [{ role: "user", content: "x" }], accept: () => null, backoff: 0, log: () => {} }),
+    /gave up after 4 attempts/,
+  );
+  assert.equal(calls.length, 4, "it stopped as soon as there was nothing left to try");
 });
 
 test("a run with nothing to try fails before it spends an attempt", async () => {

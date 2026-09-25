@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rank, planPins, compare, rotate, renderReport, parseCatalog, settings, ROUTER } from "../src/models.js";
+import { rank, planPins, compare, rotate, renderReport, renderPins, parseCatalog, settings, ROUTER } from "../src/models.js";
 
 // A catalog row shaped like the real one. score is the published coding index,
 // ctx and out the room to work.
@@ -142,4 +142,29 @@ test("the catalog has to be a list of models", () => {
   assert.equal(parseCatalog({ data: [{ id: "a" }] }).length, 1);
   assert.equal(parseCatalog(JSON.stringify({ data: [{ id: "a" }] })).length, 1);
   assert.throws(() => parseCatalog({ error: "nope" }), /not a list of models/);
+});
+
+test("the pins are rewritten by parsing the config, not by matching a pattern", () => {
+  // A key that looks like models but is not one must survive untouched, which is
+  // what a regex over the file text would get wrong.
+  const text = `${JSON.stringify({ prefs: { models: ["nested"] }, models: ["a:free", "b:free"], post_verdicts: true, ignore_paths: ["dist/"] }, null, 2)}\n`;
+  const out = JSON.parse(renderPins(text, ["c:free"]));
+  assert.deepEqual(out.models, ["c:free"], "the real pins were replaced");
+  assert.deepEqual(out.prefs.models, ["nested"], "the nested key is not the pins and was left alone");
+  assert.equal(out.post_verdicts, true, "the rest of the config survives");
+  assert.deepEqual(out.ignore_paths, ["dist/"]);
+});
+
+test("writing the same pins leaves the file byte for byte alone", () => {
+  const text = `${JSON.stringify({ models: ["a:free", "b:free"], post_verdicts: true }, null, 2)}\n`;
+  assert.equal(renderPins(text, ["a:free", "b:free"]), text, "a week with no change writes nothing");
+  assert.notEqual(renderPins(text, ["b:free", "a:free"]), text, "reordering is a change, since the order is the ranking");
+  assert.equal(renderPins(text, ["a:free"]), renderPins(text, ["a:free"]), "and it is deterministic");
+});
+
+test("the config must be a JSON object, and a broken one is a loud failure", () => {
+  assert.throws(() => renderPins("not json", ["a:free"]), /JSON/);
+  assert.throws(() => renderPins("[1,2]", ["a:free"]), /not a JSON object/, "an array would stringify to something with no models key, dropping the pins");
+  assert.throws(() => renderPins("null", ["a:free"]), /not a JSON object/);
+  assert.equal(renderPins("{}", ["a:free"]), `${JSON.stringify({ models: ["a:free"] }, null, 2)}\n`, "an object with no models yet is fine, it gains one");
 });
