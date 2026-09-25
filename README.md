@@ -60,7 +60,6 @@ on standard runners, so the reviews cost nothing however many run.
   reads as an all-clear. A model given only a diff tends to report a setting as
   wrong when something else in the repo already sets it that way, or to assert a
   fact about the world it has no way of checking. This is what stops both.
->>>>>>> 06f8e81 (Give the model facts it can check instead of a diff and a guess)
 
 ## Who gets reviewed
 
