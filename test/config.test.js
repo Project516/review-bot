@@ -20,8 +20,11 @@ test("without the secret nothing is reviewed", () => {
   assert.match(d.reason, /REVIEWBOT_POLICY/);
 });
 
-test("the model list never falls back to the free router", () => {
-  // The router hands some requests to tiny models and safety classifiers.
+test("the pins are free models, and never the free router itself", () => {
+  // The router is the last resort, not a pin: it hands some requests to tiny
+  // models and safety classifiers. Keeping it out of the list is what stops a
+  // review going to a 2B model that will concede a point it should hold.
   const { models } = loadConfig(undefined, {});
+  assert.ok(models.length > 0);
   assert.ok(models.every((m) => m.endsWith(":free") && !m.startsWith("openrouter/")));
 });

@@ -8,6 +8,7 @@ import { client, installationToken, appSlug, GitHubError } from "./github.js";
 import { renderDiff, validLines, splitComments } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
+import { rotate } from "./models.js";
 import { redactor } from "./log.js";
 import { reply, fetchThreads, isSettled, footer, fetchChecks } from "./reply.js";
 import { baselineOf, siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
@@ -108,7 +109,7 @@ async function main() {
 
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
-    models: cfg.models,
+    models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
     messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled, facts }),
     accept: parseReview,
     log,

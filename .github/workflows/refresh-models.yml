@@ -1,0 +1,39 @@
+name: Refresh model pins
+
+# Free models come and go. This ranks what is on the free list today against
+# the pins in reviewbot.json and opens a PR with the new order. It never pushes
+# to master and never merges: the human who reads the ranking decides.
+on:
+  schedule:
+    # Mondays, early, when the week's models have settled.
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-model-pins
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # This job branches off origin/master and pushes from there, so it needs
+          # the history rather than the one commit checkout fetches by default.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Rank the free models
+        run: node src/refresh-models.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fail the tests if the pins or the code are wrong
+        if: always()
+        run: node --test

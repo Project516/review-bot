@@ -16,6 +16,10 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   `reviewbot.json`; who the bot works for is in the `REVIEWBOT_POLICY` secret.
   The deploy workflow hands the owner list to the Worker so an unwanted install
   is dropped before it costs a run. It is passed, never re-typed.
+- The pins in `reviewbot.json` are the best free models as of the last weekly
+  re-pin, and a human merges that PR. A run is never handed a model that is not
+  free, and the free router is the last resort, never a pin, so a review never
+  lands on a tiny model just because it was up.
 - Nothing checked into this repo names an account, a repo or a person, in code,
   config, commit messages, PR descriptions or docs. It is public and the repos
   it reviews are not. Placeholders in docs read `your-login`, `your-org`.
@@ -45,14 +49,15 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   policy secret. `src/policy.js` who gets reviewed. `src/diff.js` patch parsing and budget.
   `src/prompt.js` model prompts, lenient JSON parsing, and the house style
   applied to model text. `src/style.js` rewrites the long dashes out of a
-  review before it is published. `src/facts.js` gathers what the model cannot
-  fetch for itself. `src/github.js` App
+  review before it is published. `src/github.js` App
   JWT, installation token, tiny REST and GraphQL client. `src/openrouter.js`
   completion with retries. `src/reply.js` answers a reply on one of the bot's
   review threads, and approves the PR once every thread from the last
   `REQUEST_CHANGES` review is settled. `src/facts.js` gathers what a review can
   check instead of guess at: base versions of the changed files, the names beside
-  a file the PR adds, and the check runs at head.
+  a file the PR adds, and the check runs at head. `src/models.js` ranks the free
+  models and builds the rotation a run tries, and `src/refresh-models.js` is the
+  weekly job that re-picks the pins and opens the PR.
 - `test/` `node --test` suites for everything that does not need the network.
 - `scripts/setup.sh` human setup wizard, kept because setup repeats on a fresh
   account.
