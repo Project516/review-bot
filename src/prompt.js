@@ -1,8 +1,12 @@
+import { stripEmDashes } from "./style.js";
+
 const SYSTEM = `You are a senior engineer reviewing a pull request. Be direct and specific.
 
 Look for: bugs, wrong logic, unhandled errors and edge cases, security problems, data loss, races, performance traps, and code that does not do what the PR says it does. Mention style only when it hides a real problem. Do not praise, do not restate the diff, do not pad.
 
 Comments are only for problems the author should act on. Never describe what the change does and never praise it; that belongs in the summary, if anywhere.
+
+Write with periods, commas, colons and parentheses. Never use an em dash or a long dash to join a thought, and never use one as a stand-in for a comma, a colon or a full stop. If a sentence needs a break, end it. A hyphen inside a word, a number range and a command flag are all fine.
 
 Respond with a single JSON object and nothing else. No working notes, no reasoning, no text before or after it. Decide first, then write only the object:
 {
@@ -93,6 +97,9 @@ export function parseReview(text) {
   return firstValid(text, coerceReview);
 }
 
+// coerceReview returns null when the candidate is not a review. Every piece of
+// model prose passes through stripEmDashes on the way in, so a dash the model
+// reaches for never reaches a pull request even if the prompt is ignored.
 function coerceReview(candidate) {
   const obj = parseJson(candidate);
   if (!obj) return null;
@@ -100,11 +107,11 @@ function coerceReview(candidate) {
   const comments = Array.isArray(obj.comments)
     ? obj.comments
         .filter((c) => c && typeof c.path === "string" && typeof c.body === "string")
-        .map((c) => ({ path: c.path, line: Number.parseInt(c.line, 10), body: c.body.trim() }))
+        .map((c) => ({ path: c.path, line: Number.parseInt(c.line, 10), body: stripEmDashes(c.body.trim()) }))
         .filter((c) => c.body)
     : [];
   return {
-    summary: obj.summary.trim(),
+    summary: stripEmDashes(obj.summary.trim()),
     verdict: VERDICTS.has(obj.verdict) ? obj.verdict : "comment",
     comments,
   };
@@ -121,7 +128,7 @@ function coerceReply(candidate) {
   if (typeof obj.reply !== "string" || !obj.reply.trim()) return null;
   const resolved = coerceBool(obj.resolved);
   if (resolved === null) return null;
-  return { reply: obj.reply.trim(), resolved };
+  return { reply: stripEmDashes(obj.reply.trim()), resolved };
 }
 
 function coerceBool(value) {

@@ -43,6 +43,15 @@ No VPS. Oracle Cloud would work but is one more machine to keep alive for a
 job that runs a few times a day. A public repo gets unlimited Actions minutes
 on standard runners, so the reviews cost nothing however many run.
 
+- **House style is enforced, not requested.** The prompt tells the model to
+  write with periods, commas, colons and parentheses, and `src/style.js` then
+  rewrites any long dash that still arrives: a comma between clause halves, a
+  space after a finished sentence. Hyphens, number ranges, command flags and
+  anything inside code are left alone. A dash it cannot classify is left as it
+  is, because a mangled sentence is worse than a dashed one. The rewrite sits in
+  the parse layer, so it covers the summary, every comment and every thread
+  reply.
+
 ## Who gets reviewed
 
 Policy comes from two places. Who it works for is a secret; how it reviews is
