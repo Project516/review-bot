@@ -2,4 +2,3 @@ node_modules/
 .env
 *.pem
 .wrangler/
-pr-style.md
