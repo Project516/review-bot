@@ -167,7 +167,7 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
 
   const { value, model } = await complete({
     apiKey,
-    models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
+    models: rotate(cfg.models, cfg.model_runners_up ?? []),
     messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, checks, slug }),
     accept: parseReply,
     log,

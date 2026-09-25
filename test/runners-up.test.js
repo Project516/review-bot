@@ -53,7 +53,7 @@ test("a review run uses the recorded runners-up between the pins and the router"
   // This is the whole point of writing them down. Before, both call sites passed
   // an empty list, so a pin that left the free list had only the router left.
   const config = JSON.parse(withRunnersUp(readFileSync(CONFIG, "utf8"), ["c/spare:free"]));
-  const order = rotate(config.models, config[RUNNERS_KEY] ?? [], config);
+  const order = rotate(config.models, config[RUNNERS_KEY] ?? []);
   assert.deepEqual(order.slice(0, config.models.length), config.models, "pins come first, in order");
   assert.ok(order.includes("c/spare:free"), "the spare is reachable");
   assert.equal(order[order.length - 1], ROUTER, "the router is still the last resort");
@@ -66,7 +66,7 @@ test("a config with no runners-up key still runs, on the pins and the router", (
   // turn this into a test of a checked-in file that changes under it.
   const config = { models: ["a/pin:free", "b/pin:free"] };
   assert.equal(RUNNERS_KEY in config, false, "the key is absent on a fresh checkout");
-  const order = rotate(config.models, config[RUNNERS_KEY] ?? [], config);
+  const order = rotate(config.models, config[RUNNERS_KEY] ?? []);
   assert.deepEqual(order, [...config.models, ROUTER]);
 });
 
