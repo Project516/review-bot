@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { complete } from "../src/openrouter.js";
+import { complete, waitFor } from "../src/openrouter.js";
 
 const reply = (content, extra = {}) =>
   new Response(JSON.stringify({ model: "m", choices: [{ message: { content }, ...extra }] }), { status: 200 });
@@ -144,4 +144,18 @@ test("an empty balance still throws, because that is the account not the model",
   const calls = stub([new Response("insufficient credits", { status: 402 })]);
   await assert.rejects(run(() => null), /OpenRouter 402/);
   assert.equal(calls.length, 1);
+});
+
+test("a long rotation does not spend the job's whole budget asleep", () => {
+  // The rotation is however many pins and runners-up the config holds, so the
+  // wait between attempts has to stay bounded or the job is killed by its 20
+  // minute timeout before it ever reaches the router at the end. Growing
+  // backoff * attempt across twelve attempts is over sixteen minutes on its own.
+  const rotation = 12;
+  const tries = Math.max(5, rotation);
+  const total = Array.from({ length: tries }, (_, i) => waitFor(i, 15000)).reduce((a, b) => a + b, 0);
+  assert.ok(total < 6 * 60 * 1000, `${Math.round(total / 60000)} min of sleep leaves no room in a 20 minute job`);
+  assert.equal(waitFor(0, 15000), 0, "the first attempt does not wait");
+  assert.equal(waitFor(1, 15000), 15000, "it still backs off rather than hammering the endpoint");
+  assert.equal(waitFor(99, 15000), 20000, "and it stops growing");
 });

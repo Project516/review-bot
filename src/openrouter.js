@@ -8,6 +8,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // model, and retrying those just spends the run's budget to fail again.
 const RETRYABLE = [400, 403, 404, 429];
 
+// The wait between attempts tops out here. Growing it without a ceiling is fine
+// for five attempts and ruinous for a longer rotation: the rotation is however
+// many pins and runners-up the config holds, and sleeping backoff * i across
+// twelve of them is over sixteen minutes of the twenty the review job has. The
+// job would be killed before it reached the router, which is the whole reason
+// the rotation grew. This leaves a long rotation under four minutes of sleep,
+// so the calls themselves have room inside the 20 minute job timeout.
+const MAX_BACKOFF = 20000;
+
+// waitFor is how long to sit before attempt n, so the cap is one function and
+// can be tested without waiting out a real backoff.
+export const waitFor = (attempt, backoff, cap = MAX_BACKOFF) => Math.min(backoff * attempt, cap);
+
 const NUDGE = {
   role: "system",
   content:
@@ -24,8 +37,8 @@ const NUDGE = {
 // runners-up behind them, and the free router last. attempts defaults to one
 // pass over the whole rotation, because a run that never reaches the router
 // cannot recover from every pin being dead at once. The client stops asking a
-// model for more once it has answered 404 or 400, so a run never wastes an
-// attempt on a model that has already left the free list.
+// model for more once it has answered 404, so a run never wastes an attempt on
+// a model that has already left the free list.
 export async function complete({ apiKey, models, messages, accept = (t) => t, attempts, backoff = 15000, log = console.log }) {
   if (!models?.length) throw new Error("no models to try");
   const tries = attempts ?? Math.max(5, models.length);
@@ -51,7 +64,7 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
 
   for (let i = 0; i < tries; i++) {
     if (i) {
-      const wait = backoff * i;
+      const wait = waitFor(i, backoff);
       log(`openrouter attempt ${i} failed (${last}), retrying in ${wait / 1000}s`);
       await sleep(wait);
     }
