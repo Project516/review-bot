@@ -16,6 +16,11 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  # A PR opened with GITHUB_TOKEN does not trigger other workflows, so the
+  # push_request and pull_request runs this PR would normally get never happen
+  # and it would reach master ungated. workflow_dispatch is the one trigger that
+  # does fire with this token, so the job asks for the test run itself.
+  actions: write
 
 jobs:
   refresh:
@@ -33,6 +38,21 @@ jobs:
       - name: Run the tests
         run: node --test
       - name: Rank the free models
+        id: pins
         run: node src/refresh-models.js
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The ref comes from the job rather than being written here, because a week
+      # with no change pushes no branch at all: a name typed in twice is the same
+      # name whether the job wrote it this week or left it alone last week, and
+      # dispatching then tests a stale commit or 404s on a ref that is not there.
+      # always() still holds, so a push that is followed by a failed PR open is
+      # tested rather than quietly left ungated.
+      - name: Run the tests on the branch this PR carries
+        if: always() && steps.pins.outputs.ref != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ steps.pins.outputs.ref }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/dispatches" -f ref="$REF"
+          echo "tests dispatched on $REF"
