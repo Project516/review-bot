@@ -5,7 +5,7 @@
 //
 // This job names no repo, owner or author, and the only thing it reads out of
 // the catalog is model ids, which are public.
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "./config.js";
@@ -85,6 +85,22 @@ function commitAndPush({ current, desired, change }) {
   );
   git("push", "--force", "origin", `${BRANCH}:${BRANCH}`);
   log(`pushed ${BRANCH}: ${current.join(", ") || "none"} -> ${desired.join(", ")}`);
+  recordPush();
+}
+
+// recordPush hands the ref to the workflow, which dispatches the test run on
+// it. A week with no change opens no PR and pushes nothing, so from outside
+// the job the name is the same whether this branch is the one just written
+// or last week's, and dispatching on the name alone tests a stale commit, or
+// fails outright on a first run where the ref does not exist yet.
+export function recordPush() {
+  const step = process.env.GITHUB_OUTPUT;
+  if (!step) return;
+  try {
+    appendFileSync(step, `ref=${BRANCH}\n`);
+  } catch (e) {
+    log(`step output unavailable: ${e.message}`);
+  }
 }
 
 async function main() {
