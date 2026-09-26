@@ -78,8 +78,9 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   The reviewer decides from it and from the loaded config alone.
 - **owner**: the single login in `REVIEWBOT_POLICY` that may issue `/review`.
 - **allowed author**: a login whose PRs get reviewed automatically.
-- **forced review**: a review requested with `/review`. Skips the author list
-  and the already-reviewed check.
+- **forced review**: a review requested with `/review`. Skips the author
+  list, but not the already-reviewed check: the marker is what says the diff
+  has been read, and a second read of an unchanged head says nothing new.
 - **ref**: the Worker's anonymous handle for a repo, an HMAC of the full name
   keyed by the webhook secret. The only name for a repo that reaches the public
   Actions log.

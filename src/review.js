@@ -2,6 +2,7 @@
 // applies reviewbot.json, and posts one review on the PR, or, for a reply
 // job, hands off to reply.js.
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { loadConfig, requireEnv } from "./config.js";
 import { decide } from "./policy.js";
 import { client, installationToken, appSlug, GitHubError } from "./github.js";
@@ -23,6 +24,11 @@ const RESOLVE_PERMISSIONS = { contents: "write", pull_requests: "write" };
 const RESOLVE_MUTATION = `mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
 
 const VERDICT_EVENT = { approve: "APPROVE", comment: "COMMENT", request_changes: "REQUEST_CHANGES" };
+
+// The run being read back is this job's own run in the review repo, which is
+// not the repo under review, so it is named here rather than taken from the
+// job.
+const API_RUNS = () => `/repos/${process.env.GITHUB_REPOSITORY}/actions/runs`;
 
 // readJob takes EVENT_JSON when set, for a run by hand, and otherwise the
 // repository_dispatch payload from the file Actions writes to GITHUB_EVENT_PATH.
@@ -65,12 +71,19 @@ async function main() {
 
   const pr = await api.get(`${base}/pulls/${job.pr}`);
   const marker = `<!-- review-bot head=${pr.head.sha} -->`;
-  if (!decision.forced) {
+  // Asked here and again just before the post, and asked of a forced
+  // review too. The marker says this head has been read already, and a
+  // /review typed while the automatic review was still working is looking
+  // at the same diff the automatic one is looking at, so the second one has
+  // nothing to add. The gap between the two asks is one model call, which
+  // is long enough for a competing run to finish and post in between.
+  const alreadyReviewed = async () => {
     const reviews = await api.paginate(`${base}/pulls/${job.pr}/reviews`);
-    if (reviews.some((r) => r.body?.includes(marker))) {
-      log(`already reviewed ${pr.head.sha}, skipping`);
-      return;
-    }
+    return reviews.some((r) => r.body?.includes(marker));
+  };
+  if (await alreadyReviewed()) {
+    log(`already reviewed ${pr.head.sha}, skipping`);
+    return;
   }
 
   const files = await api.paginate(`${base}/pulls/${job.pr}/files`);
@@ -123,6 +136,20 @@ async function main() {
   const body = (extra) => [review.summary, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
   const event = cfg.post_verdicts ? VERDICT_EVENT[review.verdict] : "COMMENT";
 
+  // Nothing has been published up to here, so this is the last cheap moment
+  // to notice the run was superseded. A run that something replaced is
+  // marked cancelled without the runner signalling node, so it used to carry
+  // on and post a review several seconds after the run that replaced it had
+  // already started. Reading the run back is the only barrier that works.
+  if (await superseded()) {
+    log("run was cancelled while the model worked, not posting");
+    return;
+  }
+  if (await alreadyReviewed()) {
+    log(`already reviewed ${pr.head.sha} while this run worked, not posting a second`);
+    return;
+  }
+
   try {
     await api.post(`${base}/pulls/${job.pr}/reviews`, { commit_id: pr.head.sha, event, body: body(stray), comments: inline });
     log(`posted review: ${inline.length} inline, ${stray.length} in body`);
@@ -130,6 +157,30 @@ async function main() {
     if (!(e instanceof GitHubError && e.status === 422) || inline.length === 0) throw e;
     log(`inline comments rejected (${e.message}), posting body only`);
     await api.post(`${base}/pulls/${job.pr}/reviews`, { commit_id: pr.head.sha, event, body: body([...inline, ...stray]) });
+  }
+}
+
+// calledOff is what a run that has been superseded looks like. A cancelled run
+// reports conclusion cancelled while status is still in_progress, because the
+// runner is waiting on a process it never managed to signal, so conclusion alone
+// is the case that actually happens.
+export const calledOff = (run) => run?.status === "completed" || run?.conclusion === "cancelled";
+
+// superseded reports whether this job's own run has already been called off.
+// It reads the run with the workflow's token rather than the App's, so the
+// App is not given actions: read it has no other use for.
+async function superseded() {
+  const runId = process.env.GITHUB_RUN_ID;
+  if (!runId || !process.env.GITHUB_TOKEN) return false;
+  try {
+    const run = await client(process.env.GITHUB_TOKEN).get(`${API_RUNS()}/${runId}`);
+    return calledOff(run);
+  } catch (e) {
+    // Unknowable is not cancelled, and failing closed here would cost a real
+    // review over a transient API blip. The marker check is the backstop for
+    // the duplicate this is really about.
+    console.error(scrub(`run status unavailable: ${e.message}`));
+    return false;
   }
 }
 
@@ -141,7 +192,11 @@ function install(job) {
 
 const fmtStray = (c) => `- \`${c.path}\`${Number.isFinite(c.line) ? `:${c.line}` : ""}: ${c.body}`;
 
-main().catch((e) => {
-  console.error(scrub(e?.stack ?? e));
-  process.exit(1);
-});
+// main runs on import only when this file is the entry point, so a test can
+// import the helpers above without the job starting and reaching for a token.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main().catch((e) => {
+    console.error(scrub(e?.stack ?? e));
+    process.exit(1);
+  });
+}

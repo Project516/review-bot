@@ -109,8 +109,9 @@ worker` workflow.
 
 PRs from anyone else are skipped with a reason in the Actions log. Comment
 `/review` on the PR as the owner and it gets reviewed anyway; the bot reacts
-with eyes so you know it heard. `/review` also forces a fresh review on a head
-the bot already covered. Draft PRs wait until they are marked ready.
+with eyes so you know it heard. Push a commit and `/review` picks up the new
+head, but `/review` on a head the bot already covered does nothing, because
+there is no change to read. Draft PRs wait until they are marked ready.
 
 ### Which models it uses
 

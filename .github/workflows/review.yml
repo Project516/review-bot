@@ -9,6 +9,10 @@ on:
 
 permissions:
   contents: read
+  # The job reads its own run back before posting, to notice a run that something
+  # superseded. A cancelled run is not signalled, so without this the review lands
+  # anyway. Read only, and on this token, so the App is not given actions scope.
+  actions: read
 
 concurrency:
   group: review-${{ github.event.client_payload.ref }}-${{ github.event.client_payload.pr }}-${{ github.event.client_payload.thread || 'review' }}
