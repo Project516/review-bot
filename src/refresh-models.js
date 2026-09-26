@@ -96,11 +96,11 @@ function commitAndPush({ current, desired, change }) {
 export function recordPush() {
   const step = process.env.GITHUB_OUTPUT;
   if (!step) return;
-  try {
-    appendFileSync(step, `ref=${BRANCH}\n`);
-  } catch (e) {
-    log(`step output unavailable: ${e.message}`);
-  }
+  // No catch. The ref is the only thing that makes the workflow dispatch, so a
+  // write that fails quietly leaves the branch it just pushed untested, which
+  // is the gap this whole step exists to close. Failing the job is the honest
+  // outcome: the branch is pushed either way and a human can see why.
+  appendFileSync(step, `ref=${BRANCH}\n`);
 }
 
 async function main() {
