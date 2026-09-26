@@ -9,6 +9,7 @@
     "excluded_ids": ["thinkingmachines/inkling:free"]
   },
   "post_verdicts": true,
+  "max_output_tokens": 24000,
   "max_diff_chars": 60000,
   "max_facts_chars": 15000,
   "ignore_paths": [

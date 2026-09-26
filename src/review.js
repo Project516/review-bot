@@ -112,6 +112,7 @@ async function main() {
     models: rotate(cfg.models, cfg.model_runners_up ?? []),
     messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled, facts }),
     accept: parseReview,
+    maxTokens: cfg.max_output_tokens,
     log,
   });
   log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
