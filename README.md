@@ -44,7 +44,10 @@ listening. Nothing else needs a server:
   stale. `Refresh model pins` runs on Mondays, reads the OpenRouter catalog,
   ranks the free models by the coding score OpenRouter publishes for them, and
   opens a PR with the new order. It never pushes to master and never merges:
-  you read the ranking and decide. See [Which models it uses](#which-models-it-uses).
+  you read the ranking and decide. That PR is opened with the workflow's own
+  token, and GitHub does not let an event raised with that token trigger other
+  workflows, so the job asks for the `Test` run on its branch itself rather than
+  leaving it ungated. See [Which models it uses](#which-models-it-uses).
 
 No VPS. Oracle Cloud would work but is one more machine to keep alive for a
 job that runs a few times a day. A public repo gets unlimited Actions minutes
