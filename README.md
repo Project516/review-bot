@@ -34,7 +34,9 @@ listening. Nothing else needs a server:
   model that is gone from the free list, and whenever the reply is not a review,
   so a retry is how the job gets off a model that is down or thinks out loud. A
   model that answers 404 is dropped from the rest of that run, so a pin that
-  left the free list costs one attempt and not the whole run. The
+  left the free list costs one attempt and not the whole run. A run gets one
+  pass over the list plus a small reserve, so a rotation that is entirely dead
+  on the first pass still retries the router rather than posting nothing. The
   `openrouter/free` router is held back as the last resort rather than used as
   a pin: it hands some requests to tiny models and safety classifiers, and a
   tiny model will concede a point it should not, so it only gets a run when
@@ -105,6 +107,7 @@ worker` workflow.
 | `post_verdicts` | `false` posts everything as a comment review; `true` lets the model approve or request changes |
 | `max_diff_chars` | budget for the diff sent to the model; files past it are listed, not shown |
 | `max_facts_chars` | budget for the gathered facts; past it, base code is cut first and the cut files are named as a gap |
+| `max_output_tokens` | room for one answer, default 24000. It has to clear what a reasoning model spends thinking, because the trace is kept out of the reply but the tokens are still spent |
 | `ignore_paths` | exact names, `*.suffix`, or `dir/` prefixes to leave out |
 
 PRs from anyone else are skipped with a reason in the Actions log. Comment
