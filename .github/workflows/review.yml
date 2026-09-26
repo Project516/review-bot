@@ -17,7 +17,12 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A run spends real time waiting: the rotation is a pass over the pins, the
+    # runners-up and the router plus a reserve, and a measured call on a busy free
+    # model ran past a minute. 30 leaves the calls room inside the budget the
+    # retry logic asks for, so the reserve is spent on calls rather than lost to
+    # the runner killing the job.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

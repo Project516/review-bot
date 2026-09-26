@@ -10,16 +10,41 @@ const RETRYABLE = [400, 403, 404, 429];
 
 // The wait between attempts tops out here. Growing it without a ceiling is fine
 // for five attempts and ruinous for a longer rotation: the rotation is however
-// many pins and runners-up the config holds, and sleeping backoff * i across
-// twelve of them is over sixteen minutes of the twenty the review job has. The
-// job would be killed before it reached the router, which is the whole reason
-// the rotation grew. This leaves a long rotation under four minutes of sleep,
-// so the calls themselves have room inside the 20 minute job timeout.
+// many pins and runners-up the config holds, plus a reserve, and sleeping
+// backoff * i across all of those eats the job timeout. The ceiling is what
+// keeps the sleeping bounded as the free list grows.
 const MAX_BACKOFF = 20000;
+
+// max_tokens is the room one answer gets. It has to clear what a reasoning
+// model spends thinking, because excluding the trace from the content does not
+// stop the tokens being spent: a model that spends this whole budget on
+// reasoning returns an empty completion and the run counts it as a failure.
+// 24000 is above the 8000 that was truncating, and under the output cap the
+// pins are ranked for.
+const DEFAULT_MAX_TOKENS = 24000;
 
 // waitFor is how long to sit before attempt n, so the cap is one function and
 // can be tested without waiting out a real backoff.
 export const waitFor = (attempt, backoff, cap = MAX_BACKOFF) => Math.min(backoff * attempt, cap);
+
+// attempts is the budget when the caller names none: one pass over the rotation
+// plus a reserve held back past the end of it.
+//
+// A single pass is what a rotation of five names gave, and it left nothing. A
+// measured run spent all five and posted no review at all: one name had left the
+// free list, one was rate limited, two ran out of tokens, and the router came
+// back empty, which is the one answer that ends a run. The reserve is what the
+// router and the last live pins retry out of, and it is spent before the run
+// gives up rather than after the rotation runs out.
+//
+// It is a reserve and not a second pass over the whole rotation, because the
+// calls are slow. That measured run took nearly seven minutes for five attempts,
+// so doubling a long rotation would put the job past its own timeout before it
+// finished, which loses the same review by a different route. RESERVE is enough
+// to get past a churned-out tail and short enough to leave the calls room.
+const RESERVE = 3;
+
+export const attemptsFor = (models) => Math.max(5, models.length + RESERVE);
 
 const NUDGE = {
   role: "system",
@@ -35,13 +60,13 @@ const NUDGE = {
 //
 // models is the rotation from models.js: the pins in order, the ranked
 // runners-up behind them, and the free router last. attempts defaults to one
-// pass over the whole rotation, because a run that never reaches the router
-// cannot recover from every pin being dead at once. The client stops asking a
-// model for more once it has answered 404, so a run never wastes an attempt on
-// a model that has already left the free list.
-export async function complete({ apiKey, models, messages, accept = (t) => t, attempts, backoff = 15000, log = console.log }) {
+// pass over the rotation plus a reserve, so a live model comes round again when
+// the first pass did not produce a review. The client stops asking a model for
+// more once it has answered 404, so a run never wastes an attempt on a model
+// that has already left the free list.
+export async function complete({ apiKey, models, messages, accept = (t) => t, attempts, backoff = 15000, maxTokens = DEFAULT_MAX_TOKENS, log = console.log }) {
   if (!models?.length) throw new Error("no models to try");
-  const tries = attempts ?? Math.max(5, models.length);
+  const tries = attempts ?? attemptsFor(models);
   const dead = new Set();
   let last = "no attempt made";
   let nudge = false;
@@ -81,7 +106,7 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
         model,
         messages: nudge ? [...messages, NUDGE] : messages,
         temperature: 0.2,
-        max_tokens: 8000,
+        max_tokens: maxTokens,
         // Keep a reasoning model's trace out of the content we publish.
         reasoning: { exclude: true },
       }),
