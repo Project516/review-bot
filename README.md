@@ -135,11 +135,19 @@ out are listed in the PR with the reason.
 The qualified models are sorted by coding score, then agentic score, then
 intelligence score, then context, and the top `model_selection.pin` (5 by
 default) become the pins. A run then tries the pins in that order, then the
-runners-up the last refresh recorded, then `openrouter/free`. A pin that has
+runners-up the last refresh recorded, then the fallback. A pin that has
 left the catalog costs one wasted attempt, the model is dropped from the rest of
-that run, and the next name takes over. The router is only reached when every
+that run, and the next name takes over. The fallback is only reached when every
 name ahead of it is gone, which is the one case the free router cannot cause on
 its own.
+
+The fallback is the `model_selection.fallback` key in `reviewbot.json`, and it is
+`openrouter/free` as checked in. It is a config key so the last resort can be
+pointed somewhere else without a code change, and it stays a fallback either
+way: it is always tried last, and a pin that happens to carry the same name
+never pulls it forward. An empty or unusable value falls back to
+`openrouter/free` rather than breaking the run, because a review cannot wait
+for a human to notice a bad config.
 
 The runners-up are written into `reviewbot.json` as `model_runners_up` and a
 review run reads them from there. It does not fetch the catalog on the way to a
