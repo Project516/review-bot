@@ -64,9 +64,13 @@ export function dropRunnersUp(text) {
 // so a week that reorders the pins never carries last week's commit on top of
 // it. It runs before the config is read, so the ranking and the commit are
 // planned from the same tree.
+//
+// The author is a domain address, not a noreply one: GitHub turns a
+// users.noreply.github.com address into a link to the account behind it, so the
+// weekly commit showed an author who is neither the bot nor its author.
 function resetToMaster() {
   git("config", "user.name", "review-bot");
-  git("config", "user.email", "review-bot@users.noreply.github.com");
+  git("config", "user.email", "review-bot@project516.dev");
   git("checkout", "-B", BRANCH, "origin/master");
 }
 

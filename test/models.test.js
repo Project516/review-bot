@@ -156,6 +156,32 @@ test("the router is only ever the last resort, and never a pin", () => {
   assert.equal(new Set(rotate(["a:free", "a:free"], [{ id: "a:free" }, { id: "b:free" }])).size, 3, "no name is tried twice");
 });
 
+test("the last resort is whatever the config says it is, and still goes last", () => {
+  const cfg = { model_selection: { fallback: "router/free-alt" } };
+  const order = rotate(["a/pin:free"], ["b/spare:free"], cfg);
+  assert.deepEqual(order, ["a/pin:free", "b/spare:free", "router/free-alt"]);
+  assert.equal(order.at(-1), "router/free-alt");
+  assert.ok(!rotate(["router/free-alt", "a/pin:free"], [], cfg).slice(0, -1).includes("router/free-alt"), "a pin never overrides the configured fallback");
+});
+
+test("the fallback key is read out of model_selection, the way it is written", () => {
+  // The tests above build a cfg with the fallback already in place, so they
+  // would pass even if settings() never looked at the key. This one puts it
+  // where the config actually keeps it, which is model_selection, so a settings
+  // change that stopped reading it fails here.
+  assert.equal(settings({ model_selection: { fallback: "router/from-config" } }).fallback, "router/from-config");
+  assert.equal(rotate(["a/pin:free"], [], { model_selection: { fallback: "router/from-config" } }).at(-1), "router/from-config");
+  assert.equal(settings({}).fallback, ROUTER, "no model_selection at all still gets the default");
+});
+
+test("an unusable fallback setting falls back to the default rather than breaking the run", () => {
+  for (const value of [42, null, "", "   ", true, [], {}]) {
+    assert.equal(rotate(["a/pin:free"], [], { model_selection: { fallback: value } }).at(-1), ROUTER, `fallback ${JSON.stringify(value)} is not a usable name`);
+  }
+  assert.equal(rotate(["a/pin:free"], [], {}).at(-1), ROUTER, "no setting at all still gets the default");
+  assert.equal(rotate(["a/pin:free"], [], { model_selection: { fallback: "some/router:free" } }).at(-1), "some/router:free", "a real name is used as given");
+});
+
 test("the report names the order, the runners-up, the dead pins, and the leave-outs", () => {
   const { ranked, rejected, free } = rank([
     model("a/best", { score: 70 }),

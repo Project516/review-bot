@@ -12,7 +12,8 @@ import { rotate, planPins, ROUTER } from "../src/models.js";
 const CONFIG = new URL("../reviewbot.json", import.meta.url);
 
 test("the runners-up land in the config beside the pins, and the pins survive", () => {
-  const before = readFileSync(CONFIG, "utf8");
+  // Built, not read from reviewbot.json, which the weekly refresh rewrites.
+  const before = JSON.stringify({ models: ["a/pin:free", "b/pin:free"], post_verdicts: true });
   const after = withRunnersUp(before, ["c/spare:free", "d/spare:free"]);
   const config = JSON.parse(after);
   assert.deepEqual(config.models, JSON.parse(before).models, "the pins are untouched");
@@ -45,7 +46,10 @@ test("a week with no runners-up clears a stale list instead of keeping it", () =
 test("a config that never had runners-up is left alone, key for key", () => {
   // JSON.stringify normalises whitespace, so this compares the parsed shape
   // rather than the bytes: what matters is that no key is added or lost.
-  const before = readFileSync(CONFIG, "utf8");
+  //
+  // Built, not read: the refresh rewrites that file, and the key it asserts is
+  // absent is the key the job adds.
+  const before = JSON.stringify({ models: ["a/pin:free"], post_verdicts: true });
   assert.deepEqual(JSON.parse(dropRunnersUp(before)), JSON.parse(before));
 });
 

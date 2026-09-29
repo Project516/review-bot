@@ -9,20 +9,24 @@
 // its own: a human looks at the ranking and merges.
 const CATALOG_URL = "https://openrouter.ai/api/v1/models";
 
+// The router, held back for when every pin is dead. It is free, and it is the
+// one entry that has to be last: it is the fallback, not the plan.
+export const ROUTER = "openrouter/free";
+
 // A pin has to be free, read and write text, need a published coding score so
 // the choice is not a guess, and have room for a whole PR diff. A model with
 // no score is left out on purpose: the unbenchmarked tail of the free list is
 // where the content-safety classifiers and the 2B models live.
+//
+// fallback is the name the rotation ends on, configurable so the last resort can
+// move without a code change. It stays a fallback and never a pin.
 export const DEFAULTS = {
   pin: 5,
   min_context: 65536,
   min_completion_tokens: 16384,
   excluded_ids: [],
+  fallback: ROUTER,
 };
-
-// The router, held back for when every pin is dead. It is free, and it is the
-// one entry that has to be last: it is the fallback, not the plan.
-export const ROUTER = "openrouter/free";
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const text = (v) => (typeof v === "string" ? v : "");
@@ -147,7 +151,18 @@ export function renderPins(text, models) {
 // runners-up come from the config rather than a fresh fetch, so a review never
 // makes a second OpenRouter call to discover its own fallback. Both plain names
 // and ranked rows are accepted.
-export function rotate(current = [], ranked = []) {
+//
+// A config string that is actually a name. Whitespace counts as empty: " " is a
+// name no router answers to.
+const trimmed = (v) => (typeof v === "string" ? v.trim() : "");
+
+// cfg carries model_selection, so the last resort is the configured fallback. It
+// is still tried last whatever it is called, and a pin carrying the same name
+// never pulls it forward. A value that is not a usable name falls back to the
+// default rather than ending a rotation a review run cannot wait on with
+// something no router answers to.
+export function rotate(current = [], ranked = [], cfg = {}) {
+  const fallback = trimmed(settings(cfg).fallback) || ROUTER;
   const seen = new Set();
   const out = [];
   // The whole ranked list, not just the pins: the pins are the first few entries
@@ -155,11 +170,11 @@ export function rotate(current = [], ranked = []) {
   // set to drop.
   for (const id of [...current, ...ranked.map((r) => (typeof r === "string" ? r : r.id))]) {
     const id_ = text(id);
-    if (!id_ || id_ === ROUTER || seen.has(id_)) continue;
+    if (!id_ || id_ === fallback || seen.has(id_)) continue;
     seen.add(id_);
     out.push(id_);
   }
-  out.push(ROUTER);
+  out.push(fallback);
   return out;
 }
 
@@ -241,14 +256,15 @@ export function withNotes(body, notes) {
 // renderReport is the PR body: the ranking, the runners-up, and every model
 // left out with the reason, so the human can overrule the order on sight.
 export function renderReport({ ranked, rejected, current = [], change, cfg = {}, free, generated = new Date().toISOString() }) {
-  const { pin, min_context, min_completion_tokens } = settings(cfg);
+  // The report names the fallback in use, not the built-in one.
+  const { pin, min_context, min_completion_tokens, fallback } = settings(cfg);
   const rest = ranked.slice(pin);
   const paid = rejected.filter((r) => r.reason === "no longer free").length;
   const lines = [];
   const list = (items) => items.map((i) => `- \`${i.id}\``).join("\n");
 
   lines.push("## What this is");
-  lines.push("Opened automatically by the weekly refresh, once a week, and never merged on its own. The only edit is the `models` list in `reviewbot.json`: which free models the reviewer tries, in order, before falling back to the `openrouter/free` router.");
+  lines.push(`Opened automatically by the weekly refresh, once a week, and never merged on its own. The only edit is the \`models\` list in \`reviewbot.json\`: which free models the reviewer tries, in order, before falling back to the \`${fallback}\` router.`);
   lines.push("No code changes. If the order here is wrong, edit the list by hand and merge, and next week starts from your order instead of this one.");
   lines.push("## Before you merge");
   lines.push("- Does the top of the list look like something you want answering code reviews? That is the whole judgement. The score is OpenRouter's, not a benchmark run here.");
