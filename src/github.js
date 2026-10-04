@@ -1,3 +1,4 @@
+// App JWT, installation token, and a small REST and GraphQL client.
 import { createSign } from "node:crypto";
 
 const API = "https://api.github.com";

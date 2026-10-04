@@ -1,3 +1,4 @@
+// Model prompts, the lenient JSON parsers for replies, and the house style applied to model text.
 import { stripEmDashes } from "./style.js";
 
 const SYSTEM = `You are a senior engineer reviewing a pull request. Be direct and specific.

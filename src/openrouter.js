@@ -1,3 +1,5 @@
+// Free models are rate limited to about 20 requests a minute, and the daily cap
+// rises once the account has had 10 dollars of credit.
 const URL = "https://openrouter.ai/api/v1/chat/completions";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

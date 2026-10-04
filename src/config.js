@@ -1,3 +1,4 @@
+// Loads reviewbot.json and the REVIEWBOT_POLICY secret into one config.
 import { readFileSync } from "node:fs";
 
 // Who the bot works for lives in the REVIEWBOT_POLICY secret, not in this public
