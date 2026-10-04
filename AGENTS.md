@@ -33,7 +33,9 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   the prompt, so a silence never reads as an all-clear. The prompt carries
   today's date, because the model's knowledge is older. Before a comment is
   posted, `src/verify.js` drops what the code contradicts or what rests on a
-  fact nobody showed. A review that could not be checked never requests changes.
+  fact nobody showed. A review that could not be checked never requests changes. A review with nothing
+  left to fix approves, because auto-merge repos wait on the bot's approval; only
+  a review that could not be done properly stays a comment, and it says why.
   Nothing in there is specific to one repository or one language: this reviews
   whatever it is pointed at.
 - Fail loud in the Actions log, quiet on the PR. A skipped PR gets a log line,

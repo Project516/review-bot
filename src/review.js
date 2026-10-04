@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { loadConfig, requireEnv } from "./config.js";
 import { decide } from "./policy.js";
 import { client, installationToken, appSlug, GitHubError } from "./github.js";
-import { renderDiff, validLines, splitComments, anchorByQuote } from "./diff.js";
+import { renderDiff, validLines, splitComments, settleVerdict, anchorByQuote } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { rotate } from "./models.js";
@@ -145,22 +145,24 @@ async function main() {
   const patches = new Map(files.map((f) => [f.filename, f.patch]));
   let comments = anchorByQuote(review.comments, patches);
   let unchecked = false;
-  if (cfg.verify !== false && comments.length && review.verdict !== "approve") {
+  if (cfg.verify !== false && comments.length) {
     try {
       comments = await verify({ comments, files, dir: tree, cfg, apiKey: requireEnv("OPENROUTER_API_KEY"), log });
     } catch (e) {
       unchecked = true;
-      log(`verify failed, posting unchecked as a comment: ${e.message}`);
+      log(`verify failed, posting unchecked: ${e.message}`);
     }
   }
 
+  const unseen = diff.omitted.filter((o) => o.reason === "diff budget exhausted").map((o) => o.path);
+  const outcome = settleVerdict({ verdict: review.verdict, kept: comments, unchecked, unseen, open: open.length });
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
-  const split = splitComments(comments, valid, unchecked && review.verdict === "request_changes" ? "comment" : review.verdict);
-  const { inline, stray, dropped } = split;
+  const split = splitComments(comments, valid, outcome.verdict);
+  const { inline, stray } = split;
   review.verdict = split.verdict;
-  if (dropped) log(`approve: dropped ${dropped} comments`);
+  if (review.verdict !== outcome.verdict || outcome.note) log(`verdict ${review.verdict}: ${outcome.note || "request without an inline comment"}`);
 
-  const body = (extra) => [review.summary, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
+  const body = (extra) => [review.summary, outcome.note, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
   const event = cfg.post_verdicts ? VERDICT_EVENT[review.verdict] : "COMMENT";
 
   // Nothing has been published up to here, so this is the last cheap moment

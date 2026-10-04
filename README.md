@@ -84,9 +84,16 @@ on standard runners, so the reviews cost nothing however many run.
   reads each comment next to the code at its line and the declarations the repo
   holds for the names it quotes, and drops what that code contradicts or what
   rests on a fact nobody showed, such as a version, a signature or standard
-  library behaviour. If that pass cannot run, the review is posted as a comment
-  and never requests changes. A review only requests changes when it also has an
-  inline comment to settle in a thread.
+  library behaviour.
+
+- **A clean review approves.** The bot is the merge gate on repos that
+  auto-merge, so a review with nothing left to fix is an approval, whatever
+  verdict the model chose, and low-severity comments ride along on it. A review
+  requests changes only when a comment survived the check and has a line to
+  settle in a thread. It stays a plain comment, with the reason in the body,
+  only when it could not be done properly: the check on its comments could not
+  run, a file's diff was too large to be shown, or earlier points of its own are
+  still open in the threads.
 
 ## Who gets reviewed
 
