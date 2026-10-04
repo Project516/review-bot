@@ -28,10 +28,14 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   the review body rather than dropped or guessed.
 - A review must not guess about what it cannot see. The model gets a diff and
   nothing else, so the prompt says so, and `src/facts.js` hands it what can be
-  gathered: the base version of each changed file, the names of what sits beside
-  a file the PR adds, and the check runs at head. A gap is named in the prompt,
-  so a silence never reads as an all-clear. Nothing in there is specific to one
-  repository or one language: this reviews whatever it is pointed at.
+  gathered: the code around each change at the head commit, the names of what
+  sits beside a file the PR adds, and the check runs at head. A gap is named in
+  the prompt, so a silence never reads as an all-clear. The prompt carries
+  today's date, because the model's knowledge is older. Before a comment is
+  posted, `src/verify.js` drops what the code contradicts or what rests on a
+  fact nobody showed. A review that could not be checked never requests changes.
+  Nothing in there is specific to one repository or one language: this reviews
+  whatever it is pointed at.
 - Fail loud in the Actions log, quiet on the PR. A skipped PR gets a log line,
   not a comment.
 - Only a parsed review is ever published. A reply that is working notes, a
@@ -54,8 +58,10 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   completion with retries. `src/reply.js` answers a reply on one of the bot's
   review threads, and approves the PR once every thread from the last
   `REQUEST_CHANGES` review is settled. `src/facts.js` gathers what a review can
-  check instead of guess at: base versions of the changed files, the names beside
-  a file the PR adds, and the check runs at head. `src/models.js` ranks the free
+  check instead of guess at: the code around the changes at head, the names beside
+  a file the PR adds, and the check runs at head. `src/lookup.js` downloads the
+  repository at head and reads it (surrounding code, declarations of a name), and
+  `src/verify.js` audits the comments before they are posted. `src/models.js` ranks the free
   models and builds the rotation a run tries, and `src/refresh-models.js` is the
   weekly job that re-picks the pins and opens the PR.
 - `test/` `node --test` suites for everything that does not need the network.

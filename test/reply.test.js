@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isBot, findThread, isSettled, skipReason, latestBotReview, shouldApprove, footer, fetchChecks } from "../src/reply.js";
+import { isBot, findThread, isSettled, isOpenPoint, skipReason, latestBotReview, shouldApprove, footer, fetchChecks } from "../src/reply.js";
 
 const SLUG = "review-bot";
 const bot = (login) => ({ login });
@@ -105,4 +105,12 @@ test("fetchChecks keeps name, status and conclusion, counts runs past the first 
   const denied = { get: async () => { throw new Error("403"); } };
   assert.equal(await fetchChecks(denied, "o/r", "abc", (l) => lines.push(l)), null);
   assert.deepEqual(lines, ["reply: checks unavailable: 403"]);
+});
+
+test("an open point is a bot thread nobody has settled or resolved", () => {
+  const settled = { comments: { nodes: [comment(), { databaseId: 2, author: bot(SLUG), body: "fixed\n\n<!-- review-bot settled -->" }] } };
+  assert.equal(isOpenPoint({ isResolved: false, comments: { nodes: [comment()] } }, SLUG), true);
+  assert.equal(isOpenPoint({ isResolved: true, comments: { nodes: [comment()] } }, SLUG), false);
+  assert.equal(isOpenPoint({ isResolved: false, ...settled }, SLUG), false);
+  assert.equal(isOpenPoint({ isResolved: false, comments: { nodes: [comment({ author: bot("octocat") })] } }, SLUG), false, "a human's thread is not the bot's point");
 });

@@ -88,6 +88,11 @@ export function isSettled(thread, slug) {
   return isGraphQLBot(last?.author?.login, slug) && last.body.includes(SETTLED_MARKER);
 }
 
+// isOpenPoint is a thread the bot started that nobody has settled or resolved.
+export function isOpenPoint(thread, slug) {
+  return isGraphQLBot(thread.comments.nodes[0]?.author?.login, slug) && !thread.isResolved && !isSettled(thread, slug);
+}
+
 // skipReason says why a reply job should not get an answer, or null to proceed.
 export function skipReason(thread, slug) {
   if (!thread) return "thread not found";
@@ -162,13 +167,13 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
   const root = thread.comments.nodes[0];
   const files = await api.paginate(`/repos/${job.repo}/pulls/${job.pr}/files`);
   // The commented file goes first so the diff budget never squeezes it out.
-  const diff = renderDiff([...files].sort((a, b) => (b.filename === root.path) - (a.filename === root.path)), cfg);
+  const diff = renderDiff(files, { ...cfg, first: root.path });
   const checks = await fetchChecks(api, job.repo, headRefOid, log);
 
   const { value, model } = await complete({
     apiKey,
     models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
-    messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, checks, slug }),
+    messages: buildReplyMessages({ pr: { number: job.pr, repo: job.repo }, thread, diffText: diff.text, omitted: diff.omitted, cut: diff.cut, checks, slug }),
     accept: parseReply,
     maxTokens: cfg.max_output_tokens,
     log,

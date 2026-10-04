@@ -6,13 +6,15 @@ import { pathToFileURL } from "node:url";
 import { loadConfig, requireEnv } from "./config.js";
 import { decide } from "./policy.js";
 import { client, installationToken, appSlug, GitHubError } from "./github.js";
-import { renderDiff, validLines, splitComments } from "./diff.js";
+import { renderDiff, validLines, splitComments, anchorByQuote } from "./diff.js";
 import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { rotate } from "./models.js";
 import { redactor } from "./log.js";
-import { reply, fetchThreads, isSettled, footer, fetchChecks } from "./reply.js";
-import { baselineOf, siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
+import { reply, fetchThreads, isSettled, isOpenPoint, footer, fetchChecks } from "./reply.js";
+import { siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
+import { downloadTree, headContext } from "./lookup.js";
+import { verify } from "./verify.js";
 
 // Set once the job is parsed, so the top-level failure handler can scrub too.
 let scrub = String;
@@ -94,28 +96,38 @@ async function main() {
   }
 
   let settled = [];
+  let open = [];
   try {
     const slug = await appSlug(appId, privateKey);
     const { threads } = await fetchThreads(api.graphql, job.repo, job.pr);
-    settled = threads
-      .filter((t) => isSettled(t, slug))
-      .map((t) => ({ path: t.comments.nodes[0].path, body: t.comments.nodes[0].body }));
+    const point = (t) => ({ path: t.comments.nodes[0].path, body: t.comments.nodes[0].body });
+    settled = threads.filter((t) => isSettled(t, slug)).map(point);
+    open = threads.filter((t) => isOpenPoint(t, slug)).map(point);
   } catch (e) {
-    log(`settled points unavailable, reviewing without them: ${e.message}`);
+    log(`earlier points unavailable, reviewing without them: ${e.message}`);
+  }
+
+  // The head commit, read once: the facts take the code around each change from
+  // it and the check on the comments takes declarations from it.
+  let tree = null;
+  try {
+    tree = await downloadTree(token, job.repo, pr.head.sha);
+  } catch (e) {
+    log(`repository unreadable at head, reviewing on the diff alone: ${e.message}`);
   }
 
   // The model sees a diff and nothing else, so a claim it cannot check from the
-  // diff comes out as a guess. Hand it the base version of the files it is
-  // commenting on, what else sits beside the ones it adds, and the check runs at
-  // head, so those guesses stop.
+  // diff comes out as a guess. Hand it the code around each change at head, what
+  // else sits beside the files it adds, and the check runs at head, so those
+  // guesses stop.
   let facts = "";
   try {
-    const baseline = await baselineOf(api, job.repo, pr.base.ref, files, cfg);
+    const context = tree ? headContext(tree, files, cfg) : null;
     const siblings = await siblingsOf(api, job.repo, pr.base.ref, files, cfg);
     const checks = checksBrief(await fetchChecks(api, job.repo, pr.head.sha, log));
-    facts = renderFacts({ baseline, siblings, checks, pr: prFacts({ pr, files, baseRef: pr.base.ref }), max_chars: cfg.max_facts_chars });
-    const shown = [...baseline.values()].filter((v) => v != null).length;
-    log(`facts: ${shown} base files read, ${[...siblings.keys()].filter((k) => !k.endsWith("/")).length} folders listed, checks ${checks ? "read" : "unavailable"}`);
+    facts = renderFacts({ context, siblings, checks, pr: prFacts({ files, baseRef: pr.base.ref }), max_chars: cfg.max_facts_chars });
+    const shown = [...(context?.values() ?? [])].filter(Boolean).length;
+    log(`facts: ${shown} files with surrounding code, ${[...siblings.keys()].filter((k) => !k.endsWith("/")).length} folders listed, checks ${checks ? "read" : "unavailable"}`);
   } catch (e) {
     log(`facts unavailable, reviewing on the diff alone: ${e.message}`);
   }
@@ -123,15 +135,29 @@ async function main() {
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
     models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
-    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, settled, facts }),
+    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, cut: diff.cut, settled, open, facts }),
     accept: parseReview,
     maxTokens: cfg.max_output_tokens,
     log,
   });
   log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
 
+  const patches = new Map(files.map((f) => [f.filename, f.patch]));
+  let comments = anchorByQuote(review.comments, patches);
+  let unchecked = false;
+  if (cfg.verify !== false && comments.length && review.verdict !== "approve") {
+    try {
+      comments = await verify({ comments, files, dir: tree, cfg, apiKey: requireEnv("OPENROUTER_API_KEY"), log });
+    } catch (e) {
+      unchecked = true;
+      log(`verify failed, posting unchecked as a comment: ${e.message}`);
+    }
+  }
+
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
-  const { inline, stray, dropped } = splitComments(review.comments, valid, review.verdict);
+  const split = splitComments(comments, valid, unchecked && review.verdict === "request_changes" ? "comment" : review.verdict);
+  const { inline, stray, dropped } = split;
+  review.verdict = split.verdict;
   if (dropped) log(`approve: dropped ${dropped} comments`);
 
   const body = (extra) => [review.summary, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");

@@ -15,35 +15,9 @@
 // Rust service, a Flutter app, and a Java library.
 import { ignored } from "./diff.js";
 
-// baselineOf reads the file at the base ref, so the model can see the code the
-// patch is changing rather than only the patch. A file the patch does not touch
-// is invisible to a diff-only review, and that is how a model reports a
-// version or a pattern as wrong when something else in the repo already sets it
-// that way. Paths that are ignored, removed, or unreadable come back as null,
-// never as a guess, and a failure on one path does not fail the review.
-//
-// A file the PR adds has no base version, which is exactly the case where the
-// model most needs the surroundings: a new workflow alongside existing ones, a
-// new module next to the ones it sits beside. So siblings takes a list of paths
-// to look up instead, which is how a new file gets its neighbours. It returns
-// what it found and the paths it could not read, and the caller says so in the
-// prompt rather than letting a silence read as an all-clear.
-export async function baselineOf(api, repo, ref, files, { ignore_paths = [] } = {}) {
-  const out = new Map();
-  for (const f of files) {
-    const path = f.filename;
-    if (ignored(path, ignore_paths) || f.status === "removed") {
-      out.set(path, null);
-      continue;
-    }
-    out.set(path, await readAtRef(api, repo, ref, path));
-  }
-  return out;
-}
-
 // siblingsOf lists one directory's contents at the base ref, so a model can be
-// shown what else lives beside a file the PR adds. Only the directory the paths
-// share are fetched, and only names, so this stays one cheap call per folder.
+// shown what else lives beside a file the PR adds, which has no earlier version
+// to show. Only names are fetched, so this stays one cheap call per folder.
 export async function siblingsOf(api, repo, ref, files, { ignore_paths = [], max_names = 60 } = {}) {
   const dirs = new Map();
   for (const f of files) {
@@ -60,18 +34,6 @@ export async function siblingsOf(api, repo, ref, files, { ignore_paths = [], max
     out.set(`${dir}/`, names); // the names the patch itself adds, for the note
   }
   return out;
-}
-
-async function readAtRef(api, repo, ref, path) {
-  // The ref may be a branch name GitHub does not take in a contents path, so a
-  // failure here is expected and must not fail the review.
-  const url = `/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`;
-  try {
-    const res = await api.get(url);
-    return res?.content ? Buffer.from(res.content, "base64").toString("utf8") : null;
-  } catch {
-    return null;
-  }
 }
 
 async function readDirAtRef(api, repo, ref, dir) {
@@ -99,51 +61,54 @@ export function checksBrief(runs, { more = 0 } = {}) {
   return lines.join("\n");
 }
 
-// prFacts is what the PR says about itself. A review that never reads the
-// description cannot notice that the description and the code disagree, which
-// is how a comment ends up saying the code contradicts its own docs.
-export function prFacts({ pr, files, baseRef }) {
+// prFacts is the shape of the PR. The title and description are already in the
+// prompt, so they are not repeated here.
+export function prFacts({ files, baseRef }) {
   const lines = [];
   if (baseRef) lines.push(`base branch: ${baseRef}`);
   lines.push(`files changed: ${files.length}`);
-  if (pr?.title) lines.push(`title: ${pr.title}`);
-  if (pr?.body?.trim()) lines.push(`description:\n${pr.body.trim()}`);
   return lines.join("\n");
 }
 
-// The base version of a file is the fact the model cannot do without, so it gets
+// The code around a change is the fact the model cannot do without, so it gets
 // the larger share of the budget. Folder listings fill whatever it leaves, and
 // the checks and the description are set aside first because they are small and
 // the model leans on them hardest.
-const BASELINE_SHARE = 0.7;
-const PER_FILE_CHARS = 2000;
+const CODE_SHARE = 0.7;
+const PER_FILE_CHARS = 3000;
 
 // renderFacts is the block appended to the user message. It is labelled as
 // gathered facts, with the gaps named, so a model that finds nothing wrong
 // stops rather than inventing a problem to have something to say.
 //
+// context maps a changed file to the code around its changes at head (see
+// headContext), or null when it could not be read, or is null as a whole when
+// the repository could not be read at all.
+//
 // max_chars caps the whole block, because the model's context is the limit that
 // actually bites. A pull request touching thirty files would otherwise send more
-// base code than any pinned model can hold, and the request comes back 400 on
-// every one of them, so the run fails having spent its whole rotation. A
-// truncated review beats no review. Anything the cap leaves out is named in the
-// gaps line, the same as anything that could not be read, so a file that was cut
-// never reads as a file that was clean.
-export function renderFacts({ baseline, siblings, checks, pr, max_chars = 15000 }) {
+// code than any pinned model can hold, and the request comes back 400 on every
+// one of them, so the run fails having spent its whole rotation. A truncated
+// review beats no review. Anything the cap leaves out is named in the gaps line,
+// the same as anything that could not be read, so a file that was cut never
+// reads as a file that was clean.
+export function renderFacts({ context, siblings, checks, pr, max_chars = 15000 }) {
   const held = (checks ? checks.length : 0) + (pr ? pr.length : 0) + 400;
-  const codeBudget = Math.max(0, Math.floor((max_chars - held) * BASELINE_SHARE));
-  const readable = [...(baseline ?? [])].filter(([, text]) => text != null);
+  const codeBudget = Math.max(0, Math.floor((max_chars - held) * CODE_SHARE));
+  const readable = [...(context ?? [])].filter(([, text]) => text);
   const perFile = Math.max(400, Math.min(PER_FILE_CHARS, Math.floor(codeBudget / Math.max(1, readable.length))));
 
   const parts = [];
   const cut = [];
+  const partial = [];
   let spent = 0;
   for (const [path, text] of readable) {
-    const block = `### ${path} as it is on the base branch\n\`\`\`\n${truncate(text, perFile)}\n\`\`\``;
+    const block = `### code around the changes in ${path}, at the head commit\n\`\`\`\n${truncate(text, perFile)}\n\`\`\``;
     if (spent + block.length > codeBudget) {
       cut.push(path);
       continue;
     }
+    if (text.length > perFile) partial.push(path);
     parts.push(block);
     spent += block.length;
   }
@@ -163,12 +128,15 @@ export function renderFacts({ baseline, siblings, checks, pr, max_chars = 15000 
   if (pr) parts.push(`### about this pull request\n${pr}`);
   if (!parts.length) return "";
 
-  const missingBase = [...(baseline?.keys() ?? [])].filter((p) => baseline.get(p) == null);
+  const unreadable = [...(context?.keys() ?? [])].filter((p) => context.get(p) === null);
   const missingDir = [...(siblings?.keys() ?? [])].filter((d) => !d.endsWith("/") && siblings.get(d) == null);
   const gaps = [
-    "the base version of a file this pull request adds does not exist yet, so for those you get the names of what is beside them instead",
-    missingBase.length ? `no base version available for: ${missingBase.join(", ")}` : null,
+    "the rest of the repository is not shown: a function, class or setting that the diff uses but does not define is unknown to you, so do not describe it",
+    "a file this pull request adds is shown whole in the diff, so for those you get the names of what is beside them instead",
+    context == null ? "the files around the changes could not be read at all" : null,
+    unreadable.length ? `no surrounding code available for: ${unreadable.join(", ")}` : null,
     missingDir.length ? `could not list: ${missingDir.map((d) => d || "the root").join(", ")}` : null,
+    partial.length ? `only part of the surrounding code is shown for: ${partial.join(", ")}` : null,
     cut.length ? `left out of this review to keep the prompt within what the model can hold: ${cut.join(", ")}` : null,
     cutDirs.length ? `folders left out for the same reason: ${cutDirs.map((d) => d || "the root").join(", ")}` : null,
     "nothing here is the result of running the code, so behaviour claims still need to be reasoned about",

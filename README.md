@@ -64,17 +64,29 @@ on standard runners, so the reviews cost nothing however many run.
   the parse layer, so it covers the summary, every comment and every thread
   reply.
 
-- **A review is given facts, not just a diff.** The model cannot read the rest of
-  the repo, run anything, or look anything up, so `src/facts.js` gathers what it
-  can reach: the base version of each changed file, the names of what already
-  sits in a folder when the PR adds a file there, and the check runs at the head
-  commit. Whatever could not be gathered is named in the prompt, so a gap never
-  reads as an all-clear. A model given only a diff tends to report a setting as
-  wrong when something else in the repo already sets it that way, or to assert a
-  fact about the world it has no way of checking. This is what stops both. The
-  block is budgeted too, because a pull request touching thirty files would
-  otherwise send more base code than the model can hold and the run would fail on
-  every model in the rotation instead of reviewing less.
+- **A review is given facts, not just a diff.** The model cannot run anything or
+  look anything up, so `src/lookup.js` reads the repository at the head commit
+  and `src/facts.js` hands over what it can reach: the code around each changed
+  line (without the lines the diff already shows), the names of what sits in a
+  folder when the PR adds a file there, and the check runs at the head commit.
+  Whatever could not be gathered, cut for length or shown only in part is named
+  in the prompt, so a gap never reads as an all-clear. The prompt also carries
+  today's date and says the model's knowledge is older, so a release it has not
+  heard of is not called unreleased. The block is budgeted, because a pull
+  request touching thirty files would otherwise send more code than the model can
+  hold and the run would fail on every model in the rotation instead of
+  reviewing less.
+
+- **A comment is checked before it is posted.** Every added line in the diff
+  carries its line number, and each comment quotes the line it is about. A quote
+  that is not on that line moves the comment to the one line that has it, or into
+  the review body when none does. A second, short pass (`src/verify.js`) then
+  reads each comment next to the code at its line and the declarations the repo
+  holds for the names it quotes, and drops what that code contradicts or what
+  rests on a fact nobody showed, such as a version, a signature or standard
+  library behaviour. If that pass cannot run, the review is posted as a comment
+  and never requests changes. A review only requests changes when it also has an
+  inline comment to settle in a thread.
 
 ## Who gets reviewed
 
@@ -109,7 +121,8 @@ worker` workflow.
 | `model_selection` | optional thresholds for the weekly re-pin: `pin` (how many to keep, default 5), `min_context`, `min_completion_tokens`, `excluded_ids` (ids never pinned or tried, for a model that qualifies but answers every request with an error the ranking has no way to see) |
 | `post_verdicts` | `false` posts everything as a comment review; `true` lets the model approve or request changes |
 | `max_diff_chars` | budget for the diff sent to the model; files past it are listed, not shown |
-| `max_facts_chars` | budget for the gathered facts; past it, base code is cut first and the cut files are named as a gap |
+| `max_facts_chars` | budget for the gathered facts; past it, surrounding code is cut first and the cut files are named as a gap |
+| `verify` | `false` skips the second pass that audits comments before they are posted. `max_verify_chars` (default 12000) caps the declarations it is shown |
 | `max_output_tokens` | room for one answer, default 24000. It has to clear what a reasoning model spends thinking, because the trace is kept out of the reply but the tokens are still spent |
 | `ignore_paths` | exact names, `*.suffix`, or `dir/` prefixes to leave out |
 
