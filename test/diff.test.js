@@ -147,3 +147,13 @@ test("a review that could not be done stays a comment and says why", () => {
   assert.match(settleVerdict({ verdict: "approve", kept: [], open: 1 }).note, /1 earlier point is still open/);
   assert.equal(settleVerdict({ verdict: "request_changes", kept, unchecked: true }).verdict, "comment");
 });
+
+test("a reviewer that says it could not see enough, or threads that could not be read, keep the review a comment", () => {
+  const incomplete = settleVerdict({ verdict: "comment", kept: [], complete: false });
+  assert.equal(incomplete.verdict, "comment");
+  assert.match(incomplete.note, /could not see enough/);
+  const blind = settleVerdict({ verdict: "approve", kept: [], open: null });
+  assert.equal(blind.verdict, "comment");
+  assert.match(blind.note, /could not be read/);
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 0 }).verdict, "approve", "no open points is not the same as unknown");
+});

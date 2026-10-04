@@ -96,7 +96,7 @@ async function main() {
   }
 
   let settled = [];
-  let open = [];
+  let open = null;
   try {
     const slug = await appSlug(appId, privateKey);
     const { threads } = await fetchThreads(api.graphql, job.repo, job.pr);
@@ -135,7 +135,7 @@ async function main() {
   const { value: review, model } = await complete({
     apiKey: requireEnv("OPENROUTER_API_KEY"),
     models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
-    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, cut: diff.cut, settled, open, facts }),
+    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, cut: diff.cut, settled, open: open ?? [], facts }),
     accept: parseReview,
     maxTokens: cfg.max_output_tokens,
     log,
@@ -155,7 +155,7 @@ async function main() {
   }
 
   const unseen = diff.omitted.filter((o) => o.reason === "diff budget exhausted").map((o) => o.path);
-  const outcome = settleVerdict({ verdict: review.verdict, kept: comments, unchecked, unseen, open: open.length });
+  const outcome = settleVerdict({ verdict: review.verdict, kept: comments, unchecked, unseen, open: open?.length ?? null, complete: review.complete });
   const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
   const split = splitComments(comments, valid, outcome.verdict);
   const { inline, stray } = split;

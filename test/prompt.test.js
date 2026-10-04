@@ -151,3 +151,10 @@ test("parseVerdicts needs a verdict on every comment, and accepts them out of or
   assert.equal(parseVerdicts('{"comments":[{"id":0,"keep":"maybe"}]}', 1), null);
   assert.equal(parseVerdicts("keep them all", 1), null);
 });
+
+test("a review is complete unless the model says otherwise", () => {
+  assert.equal(parseReview('{"summary":"s","verdict":"approve"}').complete, true, "a model that omits the field is not penalised");
+  assert.equal(parseReview('{"summary":"s","verdict":"comment","complete":false}').complete, false);
+  assert.equal(parseReview('{"summary":"s","verdict":"comment","complete":"false"}').complete, false);
+  assert.equal(parseReview('{"summary":"s","verdict":"comment","complete":true}').complete, true);
+});

@@ -92,8 +92,9 @@ on standard runners, so the reviews cost nothing however many run.
   requests changes only when a comment survived the check and has a line to
   settle in a thread. It stays a plain comment, with the reason in the body,
   only when it could not be done properly: the check on its comments could not
-  run, a file's diff was too large to be shown, or earlier points of its own are
-  still open in the threads.
+  run, a file's diff was too large to be shown, the model said it could not see
+  enough to decide, or earlier points of its own are still open in the threads or
+  the threads could not be read.
 
 ## Who gets reviewed
 

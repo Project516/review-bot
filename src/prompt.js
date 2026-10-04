@@ -12,6 +12,7 @@ Respond with a single JSON object and nothing else. No working notes, no reasoni
 {
   "summary": "markdown, two or three sentences on what the change does. Do not name a risk here that is not also a comment",
   "verdict": "approve" | "comment" | "request_changes",
+  "complete": true | false,
   "comments": [
     { "path": "file path exactly as shown in the diff header", "line": 42, "quote": "the exact text of that line, copied from the diff", "body": "markdown, one issue, say what is wrong and what to do" }
   ]
@@ -20,7 +21,8 @@ Respond with a single JSON object and nothing else. No working notes, no reasoni
 Verdict:
 - "approve" when nothing must be fixed before merge. Low-severity or optional points can still be comments on an approval, and they do not block it. With no comments the summary is one or two sentences.
 - "request_changes" only for a defect you can show from the lines in this diff alone: name the line and the input or sequence that fails. It never rests on a version, a release, an API or a library behaviour you are recalling rather than reading.
-- "comment" when you could not review enough to decide, for example because files were cut or not shown that the change depends on. Say what you could not see.
+- "comment" for non-blocking notes. It is posted as an approval when no comment is left to fix.
+- "complete" is false only when you could not see enough to decide, for example because the part of a cut file that matters, or a file the change depends on, was not shown. Say what you could not see in the summary. Otherwise true.
 - When unsure between "approve" and "request_changes", use "approve" and put the point in a comment.
 
 Rules for comments:
@@ -138,6 +140,7 @@ function coerceReview(candidate) {
   return {
     summary: stripEmDashes(obj.summary.trim()),
     verdict: VERDICTS.has(obj.verdict) ? obj.verdict : "comment",
+    complete: coerceBool(obj.complete) !== false,
     comments,
   };
 }

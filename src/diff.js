@@ -83,10 +83,14 @@ export function anchorByQuote(comments, patches) {
 //   kept       the comments left after the audit
 //   unchecked  the audit could not run
 //   unseen     files whose diff the model never got
-//   open       earlier points of the bot that nobody has settled
-export function settleVerdict({ verdict, kept, unchecked = false, unseen = [], open = 0 }) {
+//   open       earlier points of the bot that nobody has settled, or null when
+//              the threads could not be read
+//   complete   false when the model said it could not see enough to decide
+export function settleVerdict({ verdict, kept, unchecked = false, unseen = [], open = 0, complete = true }) {
+  if (!complete) return { verdict: "comment", note: "Not approved: the reviewer could not see enough of the change to decide." };
   if (unchecked) return { verdict: "comment", note: "Not approved: the check on these comments could not run, so they are unverified." };
   if (unseen.length) return { verdict: "comment", note: `Not approved: the diff of ${unseen.join(", ")} was too large to read.` };
+  if (open === null) return { verdict: "comment", note: "Not approved: the threads could not be read, so earlier points are unchecked." };
   if (open) return { verdict: "comment", note: `Not approved: ${open} earlier point${open === 1 ? " is" : "s are"} still open in the threads.` };
   return { verdict: verdict === "request_changes" && kept.length ? "request_changes" : "approve", note: "" };
 }
