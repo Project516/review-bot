@@ -117,3 +117,9 @@ test("source files are drawn before test files, and a file that does not fit who
   assert.deepEqual(cut, ["src/b.js", "src/c.js"], "a source file shows its start and says so");
   assert.deepEqual(omitted, [{ path: "test/a.test.js", reason: "diff budget exhausted" }], "the test file is what the budget could not hold");
 });
+
+test("the file named first is drawn before the rest, even a test file", () => {
+  const f = (filename) => ({ filename, status: "modified", additions: 1, deletions: 0, patch: "@@ -1 +1 @@\n+x" });
+  const { text } = renderDiff([f("src/a.js"), f("test/b.test.js")], { first: "test/b.test.js" });
+  assert.ok(text.indexOf("test/b.test.js") < text.indexOf("src/a.js"));
+});

@@ -167,7 +167,7 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
   const root = thread.comments.nodes[0];
   const files = await api.paginate(`/repos/${job.repo}/pulls/${job.pr}/files`);
   // The commented file goes first so the diff budget never squeezes it out.
-  const diff = renderDiff([...files].sort((a, b) => (b.filename === root.path) - (a.filename === root.path)), cfg);
+  const diff = renderDiff(files, { ...cfg, first: root.path });
   const checks = await fetchChecks(api, job.repo, headRefOid, log);
 
   const { value, model } = await complete({

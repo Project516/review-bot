@@ -95,15 +95,16 @@ const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs)(\/|$)|[._-](test|spec)\.[
 // see and why, and the files it saw only the start of. Source files are drawn
 // before test files so a tight budget is spent on the code under review, and a
 // file that does not fit whole is cut rather than dropped when there is room for
-// a useful part of it.
-export function renderDiff(files, { ignore_paths = [], max_diff_chars = 60000 } = {}) {
+// a useful part of it. The file named in first is drawn before any other.
+export function renderDiff(files, { ignore_paths = [], max_diff_chars = 60000, first } = {}) {
   const perFile = Math.floor(max_diff_chars / 3);
   const omitted = [];
   const cut = [];
   let text = "";
   let budget = max_diff_chars;
 
-  for (const f of [...files].sort((a, b) => TEST_PATH.test(a.filename) - TEST_PATH.test(b.filename))) {
+  const rank = (f) => (f.filename === first ? -1 : TEST_PATH.test(f.filename) ? 1 : 0);
+  for (const f of [...files].sort((a, b) => rank(a) - rank(b))) {
     if (ignored(f.filename, ignore_paths)) {
       omitted.push({ path: f.filename, reason: "ignored path" });
       continue;
