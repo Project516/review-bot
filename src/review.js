@@ -11,7 +11,7 @@ import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { rotate } from "./models.js";
 import { redactor } from "./log.js";
-import { reply, fetchThreads, isSettled, isOpenPoint, footer, fetchChecks } from "./reply.js";
+import { reply, fetchThreads, isSettled, isOpenPoint, staleRequests, footer, fetchChecks } from "./reply.js";
 import { siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
 import { downloadTree, headContext } from "./lookup.js";
 import { verify } from "./verify.js";
@@ -184,6 +184,22 @@ async function main() {
     if (!(e instanceof GitHubError && e.status === 422) || inline.length === 0) throw e;
     log(`inline comments rejected (${e.message}), posting body only`);
     await api.post(`${base}/pulls/${job.pr}/reviews`, { commit_id: pr.head.sha, event, body: body([...inline, ...stray]) });
+  }
+
+  if (event === "COMMENT" && review.verdict === "comment" && cfg.post_verdicts) {
+    await liftStaleRequests({ api, base, job, pr, appId, privateKey, log }).catch((e) => log(`earlier requests not lifted: ${e.message}`));
+  }
+}
+
+// liftStaleRequests dismisses the bot's own earlier CHANGES_REQUESTED reviews
+// once the threads they started are settled and this head has no request.
+async function liftStaleRequests({ api, base, job, pr, appId, privateKey, log }) {
+  const slug = await appSlug(appId, privateKey);
+  const { threads, truncated } = await fetchThreads(api.graphql, job.repo, job.pr);
+  const reviews = await api.paginate(`${base}/pulls/${job.pr}/reviews`);
+  for (const r of staleRequests({ reviews, threads, slug, headSha: pr.head.sha, truncated })) {
+    await api.put(`${base}/pulls/${job.pr}/reviews/${r.id}/dismissals`, { message: `Superseded by the review of ${pr.head.sha.slice(0, 7)}, which has no blocking findings, and its threads are settled.` });
+    log(`dismissed an earlier request for changes on ${r.commit_id.slice(0, 7)}`);
   }
 }
 

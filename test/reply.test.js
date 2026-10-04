@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isBot, findThread, isSettled, isOpenPoint, skipReason, latestBotReview, shouldApprove, footer, fetchChecks } from "../src/reply.js";
+import { isBot, findThread, isSettled, isOpenPoint, staleRequests, skipReason, latestBotReview, shouldApprove, footer, fetchChecks } from "../src/reply.js";
 
 const SLUG = "review-bot";
 const bot = (login) => ({ login });
@@ -113,4 +113,19 @@ test("an open point is a bot thread nobody has settled or resolved", () => {
   assert.equal(isOpenPoint({ isResolved: true, comments: { nodes: [comment()] } }, SLUG), false);
   assert.equal(isOpenPoint({ isResolved: false, ...settled }, SLUG), false);
   assert.equal(isOpenPoint({ isResolved: false, comments: { nodes: [comment({ author: bot("octocat") })] } }, SLUG), false, "a human's thread is not the bot's point");
+});
+
+test("an earlier request for changes is lifted only when its own threads are settled and the head moved on", () => {
+  const request = (id, over = {}) => ({ id, user: { login: `${SLUG}[bot]` }, state: "CHANGES_REQUESTED", commit_id: "old", ...over });
+  const thread = (reviewId, over = {}) => ({ isResolved: false, comments: { nodes: [comment({ pullRequestReview: { databaseId: reviewId } })] }, ...over });
+  const lift = (reviews, threads, extra = {}) => staleRequests({ reviews, threads, slug: SLUG, headSha: "new", ...extra }).map((r) => r.id);
+
+  assert.deepEqual(lift([request(1)], [thread(1, { isResolved: true })]), [1]);
+  assert.deepEqual(lift([request(1)], []), [1], "a request with no threads has nothing left to settle");
+  assert.deepEqual(lift([request(1)], [thread(1)]), [], "an open thread from that review keeps it");
+  assert.deepEqual(lift([request(1), request(2)], [thread(2), thread(1, { isResolved: true })]), [1], "a thread from another review does not block this one");
+  assert.deepEqual(lift([request(1, { commit_id: "new" })], []), [], "a request on the current head is not stale");
+  assert.deepEqual(lift([request(1, { state: "COMMENTED" })], []), []);
+  assert.deepEqual(lift([request(1, { user: { login: "octocat" } })], []), [], "someone else's review is never touched");
+  assert.deepEqual(lift([request(1)], [], { truncated: true }), [], "unknown threads are not assumed settled");
 });

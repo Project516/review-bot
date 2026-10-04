@@ -1,13 +1,15 @@
 {
   "models": [
     "qwen/qwen3.8-27b:free",
-    "inclusionai/ling-3.0-flash-fin:free",
-    "thinkingmachines/inkling-small:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "google/gemma-4-31b-it:free"
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free"
   ],
   "model_selection": {
     "excluded_ids": [
+      "inclusionai/ling-3.0-flash-fin:free",
+      "thinkingmachines/inkling-small:free",
       "thinkingmachines/inkling:free"
     ],
     "fallback": "openrouter/free"
@@ -29,8 +31,6 @@
     "build/"
   ],
   "model_runners_up": [
-    "google/gemma-4-26b-a4b-it:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
     "cohere/north-mini-code:free",
     "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
