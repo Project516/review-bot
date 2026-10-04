@@ -1,57 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { baselineOf, siblingsOf, checksBrief, prFacts, renderFacts } from "../src/facts.js";
+import { siblingsOf, checksBrief, prFacts, renderFacts } from "../src/facts.js";
 
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
 
-// A fake api that answers the contents endpoint for two paths and fails for the
-// rest, so the happy path and the failure path are both exercised.
-function stubApi(files = { "a.js": "old a" }, { fail = [] } = {}) {
-  const calls = [];
-  return {
-    calls,
-    get: async (url) => {
-      calls.push(url);
-      const path = decodeURIComponent(url.split("?")[0].replace("/repos/o/r/contents/", ""));
-      if (fail.includes(path)) throw new Error(`404 no such path ${path}`);
-      if (!(path in files)) throw new Error(`404 ${path}`);
-      return { content: b64(files[path]) };
-    },
-  };
-}
-
-test("the base version of each changed file is readable, so a diff-only blind spot is closed", async () => {
-  const api = stubApi({ "src/a.js": "old a", "src/b.js": "old b" });
-  const out = await baselineOf(api, "o/r", "main", [{ filename: "src/a.js" }, { filename: "src/b.js" }]);
-  assert.equal(out.get("src/a.js"), "old a");
-  assert.equal(out.get("src/b.js"), "old b");
-  assert.ok(api.calls.every((c) => c.includes("ref=main")), "every read is pinned to the base ref, not the head");
-});
-
-test("a file that cannot be read is null, and one failure does not stop the rest", async () => {
-  const api = stubApi({ "a.js": "old a", "c.js": "old c" }, { fail: ["b.js"] });
-  const out = await baselineOf(api, "o/r", "main", [{ filename: "a.js" }, { filename: "b.js" }, { filename: "c.js" }]);
-  assert.equal(out.get("a.js"), "old a");
-  assert.equal(out.get("b.js"), null, "an unreadable file is null, never a guess");
-  assert.equal(out.get("c.js"), "old c", "the failure on b did not stop c");
-});
-
-test("ignored and removed files are not even fetched", async () => {
-  const api = stubApi({ "dist/x.js": "old x" });
-  const out = await baselineOf(api, "o/r", "main", [{ filename: "dist/x.js" }, { filename: "gone.js", status: "removed" }], { ignore_paths: ["dist/"] });
-  assert.equal(out.get("dist/x.js"), null);
-  assert.equal(out.get("gone.js"), null);
-  assert.deepEqual(api.calls, [], "no contents calls for a path we will not show");
-});
-
-test("a path with a slash in it is not mangled into one segment", async () => {
-  const api = stubApi({ "a/b/c.js": "deep" });
-  const out = await baselineOf(api, "o/r", "main", [{ filename: "a/b/c.js" }]);
-  assert.equal(out.get("a/b/c.js"), "deep");
-  assert.ok(api.calls[0].includes("/contents/a/b/c.js"), api.calls[0]);
-});
-
-test("a new file has no base version, so its neighbours are listed instead", async () => {
+test("a new file is shown whole in the diff, so its neighbours are listed instead", async () => {
   // The case a diff-only review gets wrong: a PR adds a workflow, and the model
   // cannot see the workflows already in the repo, so it reports a setting as
   // wrong when the neighbours already use it.
@@ -63,15 +16,13 @@ test("a new file has no base version, so its neighbours are listed instead", asy
     },
   };
   const files = [{ filename: ".github/workflows/refresh-models.yml", status: "added" }];
-  const baseline = await baselineOf(api, "o/r", "master", files);
-  assert.equal(baseline.get(".github/workflows/refresh-models.yml"), null, "an added file has no base version");
   const siblings = await siblingsOf(api, "o/r", "master", files);
   assert.deepEqual(siblings.get(".github/workflows"), ["deploy-worker.yml", "review.yml", "test.yml"]);
 
-  const text = renderFacts({ baseline, siblings, checks: "- Test: success", pr: "files changed: 1" });
+  const text = renderFacts({ context: new Map(), siblings, checks: "- Test: success", pr: "files changed: 1" });
   assert.match(text, /### what else is in \.github\/workflows on the base branch/, text);
   assert.match(text, /- deploy-worker\.yml\n- review\.yml\n- test\.yml/, "the neighbours are listed, sorted, so the model can see this is a repo that already has workflows");
-  assert.match(text, /a file this pull request adds does not exist yet/, "the gap is explained, not silent");
+  assert.match(text, /a file this pull request adds is shown whole in the diff/, "the gap is explained, not silent");
   assert.ok(!/### \.github\/workflows\/refresh-models\.yml/.test(text), "no fake base for the added file");
 });
 
@@ -79,7 +30,7 @@ test("a directory that cannot be listed is named as a gap, not shown as empty", 
   const api = { get: async () => { throw new Error("404"); } };
   const siblings = await siblingsOf(api, "o/r", "master", [{ filename: "src/new.js" }]);
   assert.equal(siblings.get("src"), null);
-  const text = renderFacts({ baseline: new Map([["src/new.js", null]]), siblings, checks: "- Test: success" });
+  const text = renderFacts({ context: new Map(), siblings, checks: "- Test: success" });
   assert.match(text, /could not list: src/);
   assert.ok(!/what else is in src/.test(text), "a null listing is not rendered as an empty folder");
 });
@@ -105,34 +56,38 @@ test("the checks at head are the evidence, so a build outcome is not predicted",
 });
 
 test("the facts block names what was not available, so a gap is not read as an all-clear", () => {
-  const text = renderFacts({ baseline: new Map([["a.js", "old a"], ["b.js", null]]), checks: "- Test: success", pr: "files changed: 2" });
+  const text = renderFacts({ context: new Map([["a.js", "  12  old a"], ["b.js", null]]), checks: "- Test: success", pr: "files changed: 2" });
   assert.match(text, /## Facts gathered for this review/);
-  assert.match(text, /### a\.js as it is on the base branch/);
-  assert.match(text, /old a/);
+  assert.match(text, /### code around the changes in a\.js, at the head commit/);
+  assert.match(text, /12  old a/);
   assert.match(text, /### checks at the head commit\n- Test: success/);
-  assert.match(text, /no base version available for: b\.js/, "the file it could not read is named");
+  assert.match(text, /no surrounding code available for: b\.js/, "the file it could not read is named");
   assert.match(text, /nothing here is the result of running the code/);
-  assert.ok(!/### b\.js/.test(text), "a null baseline is not shown as if it had content");
+  assert.ok(!/### b\.js/.test(text), "a null entry is not shown as if it had content");
 });
 
 test("no facts at all is no facts block, rather than an empty heading", () => {
   assert.equal(renderFacts({}), "");
-  assert.equal(renderFacts({ baseline: new Map([["a.js", null]]) }), "", "a baseline of all nulls has nothing to show");
+  assert.equal(renderFacts({ context: new Map([["a.js", null]]) }), "", "a context of all nulls has nothing to show");
 });
 
-test("the pull request describes itself, so a code and description mismatch is visible", () => {
-  const facts = prFacts({ pr: { title: "Add a thing", body: "It does X" }, files: [{}, {}], baseRef: "main" });
+test("the pull request facts give its shape and leave the description to the prompt", () => {
+  const facts = prFacts({ files: [{}, {}], baseRef: "main" });
   assert.match(facts, /base branch: main/);
   assert.match(facts, /files changed: 2/);
-  assert.match(facts, /title: Add a thing/);
-  assert.match(facts, /It does X/);
-  assert.match(prFacts({ pr: {}, files: [{}] }), /files changed: 1/, "a PR with no title or body still yields the basics");
+  assert.doesNotMatch(facts, /description/);
 });
 
-test("a long base file is truncated rather than filling the prompt", () => {
+test("a repository that could not be read is named, not passed off as an all-clear", () => {
+  const text = renderFacts({ context: null, checks: "- Test: success" });
+  assert.match(text, /could not be read at all/);
+});
+
+test("a long excerpt is truncated and named as partial rather than filling the prompt", () => {
   const big = "x".repeat(90000);
-  const text = renderFacts({ baseline: new Map([["a.js", big]]) });
+  const text = renderFacts({ context: new Map([["a.js", big]]) });
   assert.match(text, /\.\.\. \(truncated\)/);
+  assert.match(text, /only part of the surrounding code is shown for: a\.js/);
   assert.ok(text.length < 6000, `kept it to ${text.length} chars`);
 });
 
@@ -140,25 +95,25 @@ test("the whole block is capped, so a wide pull request cannot overrun the model
   // The failure this prevents: a pull request touching many files sent more base
   // code than any pinned model can hold, and the request came back 400 on every
   // one of them, so the run failed having spent the whole rotation.
-  const baseline = new Map(Array.from({ length: 60 }, (_, i) => [`src/f${i}.js`, "x".repeat(20000)]));
-  const text = renderFacts({ baseline, checks: "- Test: success", pr: "files changed: 60", max_chars: 15000 });
+  const context = new Map(Array.from({ length: 60 }, (_, i) => [`src/f${i}.js`, "x".repeat(20000)]));
+  const text = renderFacts({ context, checks: "- Test: success", pr: "files changed: 60", max_chars: 15000 });
   assert.ok(text.length <= 16000, `held it to ${text.length} chars against a 15000 budget`);
   assert.match(text, /### checks at the head commit/, "the checks survive the cap");
   assert.match(text, /### about this pull request/, "the description survives the cap");
 });
 
 test("a file the cap left out is named as a gap, not silently dropped", () => {
-  const baseline = new Map(Array.from({ length: 40 }, (_, i) => [`src/f${i}.js`, "x".repeat(5000)]));
-  const text = renderFacts({ baseline, max_chars: 4000 });
+  const context = new Map(Array.from({ length: 40 }, (_, i) => [`src/f${i}.js`, "x".repeat(5000)]));
+  const text = renderFacts({ context, max_chars: 4000 });
   assert.match(text, /left out of this review to keep the prompt within what the model can hold/);
   const named = text.match(/left out of this review[^;]*/)[0];
   assert.ok(named.includes("src/f"), "the paths it dropped are in the gaps line, so a cut file never reads as a clean one");
 });
 
 test("the cap is not a ceiling on a small pull request", () => {
-  const baseline = new Map([["src/a.js", "old a"], ["src/b.js", "old b"]]);
-  const text = renderFacts({ baseline, checks: "- Test: success", pr: "files changed: 2", max_chars: 15000 });
-  assert.match(text, /### src\/a\.js as it is on the base branch/);
-  assert.match(text, /### src\/b\.js as it is on the base branch/);
+  const context = new Map([["src/a.js", "old a"], ["src/b.js", "old b"]]);
+  const text = renderFacts({ context, checks: "- Test: success", pr: "files changed: 2", max_chars: 15000 });
+  assert.match(text, /### code around the changes in src\/a\.js, at the head commit/);
+  assert.match(text, /### code around the changes in src\/b\.js, at the head commit/);
   assert.ok(!/left out of this review/.test(text), "nothing was cut, so nothing is named");
 });

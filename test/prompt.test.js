@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseReview, parseReply, buildReplyMessages, buildMessages } from "../src/prompt.js";
+import { parseReview, parseReply, parseVerdicts, buildReplyMessages, buildMessages, buildVerifyMessages } from "../src/prompt.js";
 
 test("parses fenced JSON and normalises fields", () => {
   const r = parseReview('Here you go:\n```json\n{"summary":" ok ","verdict":"approve","comments":[{"path":"a.js","line":"3","body":" x "},{"path":"b.js","body":""}]}\n```');
   assert.equal(r.summary, "ok");
   assert.equal(r.verdict, "approve");
-  assert.deepEqual(r.comments, [{ path: "a.js", line: 3, body: "x" }]);
+  assert.deepEqual(r.comments, [{ path: "a.js", line: 3, quote: "", body: "x" }]);
 });
 
 test("rejects prose so the caller retries instead of publishing it", () => {
@@ -106,4 +106,48 @@ test("buildReplyMessages lists check runs at head and says when they are unknown
   assert.match(build({ runs, more: 3 })[1].content, /<\/checks>\n\(3 more not shown, so this list is incomplete/);
   assert.match(build({ runs: [], more: 0 })[1].content, /\(none reported\)/);
   assert.match(build(null)[1].content, /\(unavailable, treat the build and test status as unknown\)/);
+});
+
+const pr = { base: { repo: { full_name: "octocat/x" } }, number: 1, title: "t", head: { ref: "h" }, base_ref: "m", additions: 1, deletions: 0, changed_files: 1 };
+
+test("the model is told today's date and that its knowledge may be older", () => {
+  const [system, user] = buildMessages({ pr, diffText: "diff", omitted: [], date: "2026-10-04" });
+  assert.match(user.content, /^Today's date: 2026-10-04/);
+  assert.match(system.content, /Your training ends before it/);
+  assert.match(system.content, /Never call something unreleased/);
+  assert.match(buildMessages({ pr, diffText: "d", omitted: [] })[1].content, /^Today's date: \d{4}-\d{2}-\d{2}\n/, "the date defaults to now");
+});
+
+test("open points from earlier pushes and files cut for length are named in the prompt", () => {
+  const user = buildMessages({ pr, diffText: "d", omitted: [], cut: ["big.js"], open: [{ path: "a.js", body: "still open" }] })[1].content;
+  assert.match(user, /still open\. This is a later push/s);
+  assert.match(user, /`a\.js`: still open/);
+  assert.match(user, /shown only in part.*: big\.js/);
+  assert.doesNotMatch(buildMessages({ pr, diffText: "d", omitted: [] })[1].content, /later push|only in part/);
+});
+
+test("a reply is given the date too", () => {
+  const thread = { comments: { nodes: [{ author: { login: "bot" }, body: "x", path: "a.js", line: 1 }] } };
+  const [system, user] = buildReplyMessages({ pr: { number: 1, repo: "o/r" }, thread, diffText: "d", slug: "bot", date: "2026-10-04" });
+  assert.match(user.content, /^Today's date: 2026-10-04/);
+  assert.match(system.content, /do not claim a version is unreleased/);
+});
+
+test("the audit gets each comment beside its code, and the declarations found", () => {
+  const user = buildVerifyMessages({
+    findings: [{ path: "a.js", line: 4, body: "`f` takes bytes", excerpt: "     4  f(1)", definitions: ["### f, declared in x.js\n     1  def f(n: int)"] }, { path: "b.js", line: Number.NaN, body: "gone" }],
+    date: "2026-10-04",
+  })[1].content;
+  assert.match(user, /<comment id="0" path="a\.js" line="4">\n`f` takes bytes\n<\/comment>\n<code id="0">\n {5}4 {2}f\(1\)/);
+  assert.match(user, /<comment id="1" path="b\.js" line="unknown">/);
+  assert.match(user, /the code around this line is not available/);
+  assert.match(user, /<declarations id="0">\n### f, declared in x\.js/);
+  assert.match(user, /no declarations were found for the names comment 1 mentions/);
+});
+
+test("parseVerdicts needs a verdict on every comment, and accepts them out of order", () => {
+  assert.deepEqual(parseVerdicts('{"comments":[{"id":1,"keep":false,"reason":"r"},{"id":0,"keep":"true"}]}', 2), [true, false]);
+  assert.equal(parseVerdicts('{"comments":[{"id":0,"keep":true}]}', 2), null, "a comment left unjudged is a bad reply");
+  assert.equal(parseVerdicts('{"comments":[{"id":0,"keep":"maybe"}]}', 1), null);
+  assert.equal(parseVerdicts("keep them all", 1), null);
 });
