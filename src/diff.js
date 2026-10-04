@@ -73,20 +73,40 @@ export function anchorByQuote(comments, patches) {
   });
 }
 
+// settleVerdict turns the model's verdict into the one that is posted. The bot
+// is the gate for auto-merge, so a review that has nothing to fix approves,
+// whatever the model called it, and low-severity comments ride along on the
+// approval. Only a review that could not be done properly stays a comment, and
+// it says why in a note. A request for changes needs a comment that survived
+// the audit.
+//
+//   kept       the comments left after the audit
+//   unchecked  the audit could not run
+//   unseen     files whose diff the model never got
+//   open       earlier points of the bot that nobody has settled, or null when
+//              the threads could not be read
+//   complete   false when the model said it could not see enough to decide
+export function settleVerdict({ verdict, kept, unchecked = false, unseen = [], open = 0, complete = true }) {
+  if (!complete) return { verdict: "comment", note: "Not approved: the reviewer could not see enough of the change to decide." };
+  if (unchecked) return { verdict: "comment", note: "Not approved: the check on these comments could not run, so they are unverified." };
+  if (unseen.length) return { verdict: "comment", note: `Not approved: the diff of ${unseen.join(", ")} was too large to read.` };
+  if (open === null) return { verdict: "comment", note: "Not approved: the threads could not be read, so earlier points are unchecked." };
+  if (open) return { verdict: "comment", note: `Not approved: ${open} earlier point${open === 1 ? " is" : "s are"} still open in the threads.` };
+  return { verdict: verdict === "request_changes" && kept.length ? "request_changes" : "approve", note: "" };
+}
+
 // splitComments sorts model comments into inline (a real line in the diff)
-// and stray (everywhere else). An "approve" verdict gets no comments at all:
-// nothing is posted, and dropped counts what would have been. A review that
-// requests changes needs an inline comment: replies settle threads, and a
-// request with no thread under it could never be cleared, so it becomes a comment.
+// and stray (everywhere else). A review that requests changes needs an inline
+// comment: replies settle threads, and a request with no thread under it could
+// never be cleared, so it becomes a comment.
 export function splitComments(comments, valid, verdict) {
-  if (verdict === "approve") return { inline: [], stray: [], dropped: comments.length, verdict };
   const inline = [];
   const stray = [];
   for (const c of comments) {
     if (valid.get(c.path)?.has(c.line)) inline.push({ path: c.path, line: c.line, side: "RIGHT", body: c.body });
     else stray.push(c);
   }
-  return { inline, stray, dropped: 0, verdict: verdict === "request_changes" && !inline.length ? "comment" : verdict };
+  return { inline, stray, verdict: verdict === "request_changes" && !inline.length ? "comment" : verdict };
 }
 
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs)(\/|$)|[._-](test|spec)\.[^/]*$|(^|\/)test_[^/]*$/i;

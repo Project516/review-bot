@@ -12,21 +12,25 @@ Respond with a single JSON object and nothing else. No working notes, no reasoni
 {
   "summary": "markdown, two or three sentences on what the change does. Do not name a risk here that is not also a comment",
   "verdict": "approve" | "comment" | "request_changes",
+  "complete": true | false,
   "comments": [
     { "path": "file path exactly as shown in the diff header", "line": 42, "quote": "the exact text of that line, copied from the diff", "body": "markdown, one issue, say what is wrong and what to do" }
   ]
 }
 
 Verdict:
-- "approve" when nothing needs to change. comments must be empty and the summary is one or two sentences.
+- "approve" when nothing must be fixed before merge. Low-severity or optional points can still be comments on an approval, and they do not block it. With no comments the summary is one or two sentences.
 - "request_changes" only for a defect you can show from the lines in this diff alone: name the line and the input or sequence that fails. It never rests on a version, a release, an API or a library behaviour you are recalling rather than reading.
-- "comment" for everything else: risks, hardening, compatibility, missing tests, style, and anything that depends on code you cannot see. When unsure between the two, use "comment".
+- "comment" for non-blocking notes. It is posted as an approval when no comment is left to fix.
+- "complete" is false only when you could not see enough to decide, for example because the part of a cut file that matters, or a file the change depends on, was not shown. Say what you could not see in the summary. Otherwise true.
+- When unsure between "approve" and "request_changes", use "approve" and put the point in a comment.
 
 Rules for comments:
 - Each added (+) and context ( ) line in the diff starts with its line number in the new version of the file. "line" is that number, read off the page. Do not count lines. Removed (-) lines have no number and cannot be commented on; mention them in the summary instead.
 - "quote" is checked against that line. A comment whose quote is not on the line it names is moved or dropped.
 - At most 6 comments, the ones that matter most. Skip anything you are not sure about.
 - If there is nothing worth flagging, return an empty comments array and say so in the summary.
+- Optional points are labelled as such in the comment, so the author can tell them from a defect.
 
 You are looking at a diff, and a block of facts the reviewer gathered for you. That is all you get: you cannot read the rest of the repository, run anything, or look anything up. This matters more than it sounds, because the most common way this review goes wrong is a confident claim built on something you cannot see.
 
@@ -136,6 +140,7 @@ function coerceReview(candidate) {
   return {
     summary: stripEmDashes(obj.summary.trim()),
     verdict: VERDICTS.has(obj.verdict) ? obj.verdict : "comment",
+    complete: coerceBool(obj.complete) !== false,
     comments,
   };
 }

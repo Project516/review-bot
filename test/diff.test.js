@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ignored, validLines, lineTexts, renderDiff, splitComments, anchorByQuote } from "../src/diff.js";
+import { ignored, validLines, lineTexts, renderDiff, splitComments, settleVerdict, anchorByQuote } from "../src/diff.js";
 
 test("ignored matches names, suffixes and directories", () => {
   const pats = ["pnpm-lock.yaml", "*.snap", "dist/"];
@@ -52,19 +52,17 @@ test("splitComments separates inline from stray comments", () => {
     { path: "a.js", line: 99, body: "not in the diff" },
     { path: "b.js", line: 1, body: "unknown file" },
   ];
-  const { inline, stray, dropped } = splitComments(comments, valid, "comment");
+  const { inline, stray } = splitComments(comments, valid, "comment");
   assert.deepEqual(inline, [{ path: "a.js", line: 1, side: "RIGHT", body: "fix this" }]);
   assert.deepEqual(stray, [comments[1], comments[2]]);
-  assert.equal(dropped, 0);
 });
 
-test("splitComments drops everything on an approve verdict", () => {
+test("splitComments keeps the comments of an approval", () => {
   const valid = new Map([["a.js", new Set([1])]]);
-  const comments = [{ path: "a.js", line: 1, body: "nice job" }];
-  const { inline, stray, dropped } = splitComments(comments, valid, "approve");
-  assert.deepEqual(inline, []);
-  assert.deepEqual(stray, []);
-  assert.equal(dropped, 1);
+  const { inline, stray, verdict } = splitComments([{ path: "a.js", line: 1, body: "optional" }, { path: "a.js", line: 9, body: "elsewhere" }], valid, "approve");
+  assert.equal(inline.length, 1);
+  assert.equal(stray.length, 1);
+  assert.equal(verdict, "approve");
 });
 
 test("each commentable line is numbered for the model, and a removed line is not", () => {
@@ -106,7 +104,6 @@ test("a review that asks for changes with no inline comment is a comment", () =>
   assert.equal(splitComments(stray, valid, "request_changes").verdict, "comment");
   assert.equal(splitComments([], valid, "request_changes").verdict, "comment");
   assert.equal(splitComments([{ path: "a.js", line: 1, body: "x" }], valid, "request_changes").verdict, "request_changes");
-  assert.equal(splitComments(stray, valid, "approve").verdict, "approve");
 });
 
 test("source files are drawn before test files, and a file that does not fit whole is cut instead of dropped", () => {
@@ -122,4 +119,41 @@ test("the file named first is drawn before the rest, even a test file", () => {
   const f = (filename) => ({ filename, status: "modified", additions: 1, deletions: 0, patch: "@@ -1 +1 @@\n+x" });
   const { text } = renderDiff([f("src/a.js"), f("test/b.test.js")], { first: "test/b.test.js" });
   assert.ok(text.indexOf("test/b.test.js") < text.indexOf("src/a.js"));
+});
+
+test("a review with nothing left to fix approves, whatever the model called it", () => {
+  const kept = [{ path: "a.js", line: 1, body: "x" }];
+  for (const verdict of ["approve", "comment", "request_changes"]) assert.equal(settleVerdict({ verdict, kept: [] }).verdict, "approve", `${verdict} with no comments left`);
+  assert.equal(settleVerdict({ verdict: "comment", kept }).verdict, "approve", "low-severity comments ride on the approval");
+  assert.equal(settleVerdict({ verdict: "approve", kept }).verdict, "approve");
+});
+
+test("a request for changes stands only while a comment survived the audit", () => {
+  assert.equal(settleVerdict({ verdict: "request_changes", kept: [{}] }).verdict, "request_changes");
+  assert.equal(settleVerdict({ verdict: "request_changes", kept: [] }).verdict, "approve", "the audit dropped every finding");
+});
+
+test("a review that could not be done stays a comment and says why", () => {
+  const kept = [{}];
+  const unchecked = settleVerdict({ verdict: "approve", kept, unchecked: true });
+  assert.equal(unchecked.verdict, "comment");
+  assert.match(unchecked.note, /could not run/);
+  const unseen = settleVerdict({ verdict: "approve", kept: [], unseen: ["big.js", "b.js"] });
+  assert.equal(unseen.verdict, "comment");
+  assert.match(unseen.note, /big\.js, b\.js was too large/);
+  const open = settleVerdict({ verdict: "approve", kept: [], open: 2 });
+  assert.equal(open.verdict, "comment");
+  assert.match(open.note, /2 earlier points are still open/);
+  assert.match(settleVerdict({ verdict: "approve", kept: [], open: 1 }).note, /1 earlier point is still open/);
+  assert.equal(settleVerdict({ verdict: "request_changes", kept, unchecked: true }).verdict, "comment");
+});
+
+test("a reviewer that says it could not see enough, or threads that could not be read, keep the review a comment", () => {
+  const incomplete = settleVerdict({ verdict: "comment", kept: [], complete: false });
+  assert.equal(incomplete.verdict, "comment");
+  assert.match(incomplete.note, /could not see enough/);
+  const blind = settleVerdict({ verdict: "approve", kept: [], open: null });
+  assert.equal(blind.verdict, "comment");
+  assert.match(blind.note, /could not be read/);
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 0 }).verdict, "approve", "no open points is not the same as unknown");
 });
