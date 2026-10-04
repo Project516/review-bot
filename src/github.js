@@ -52,6 +52,7 @@ export function client(token) {
   return {
     get: async (path) => (await call("GET", path)).data,
     post: async (path, body) => (await call("POST", path, body)).data,
+    put: async (path, body) => (await call("PUT", path, body)).data,
     async paginate(path) {
       const out = [];
       let url = path.includes("?") ? `${path}&per_page=100` : `${path}?per_page=100`;

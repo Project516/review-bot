@@ -71,3 +71,16 @@ test("installationToken sends permissions only when narrowing", async () => {
     restore();
   }
 });
+
+test("client.put sends a PUT with the body", async () => {
+  const restore = stubFetch(async (url, init) => {
+    assert.equal(init.method, "PUT");
+    assert.deepEqual(JSON.parse(init.body), { message: "m" });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  });
+  try {
+    assert.deepEqual(await client("t").put("/x", { message: "m" }), { ok: true });
+  } finally {
+    restore();
+  }
+});

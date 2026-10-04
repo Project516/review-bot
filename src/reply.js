@@ -136,6 +136,21 @@ export function shouldApprove({ review, threads, thread, slug, headRefOid, postV
   return { approve: true, reason: "all points from the last review are settled" };
 }
 
+// staleRequests are the bot's own CHANGES_REQUESTED reviews on earlier heads
+// that a new non-blocking review can lift: every thread the old review started
+// has been settled or resolved. A COMMENTED review does not replace a
+// CHANGES_REQUESTED one on GitHub, so without this the old request stays.
+export function staleRequests({ reviews, threads, slug, headSha, truncated = false }) {
+  if (truncated) return [];
+  return reviews.filter(
+    (r) =>
+      isBot(r.user?.login, slug) &&
+      r.state === "CHANGES_REQUESTED" &&
+      r.commit_id !== headSha &&
+      !threads.some((t) => t.comments.nodes[0]?.pullRequestReview?.databaseId === r.id && isOpenPoint(t, slug)),
+  );
+}
+
 export function footer(model, verdict, marker) {
   return `---\n<sub>review-bot, model ${model}, verdict ${verdict}</sub>\n${marker}`;
 }
