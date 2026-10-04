@@ -4,14 +4,15 @@
 
 A self-hosted GitHub App that reviews one person's pull requests with a free
 OpenRouter model. One owner, a short list of trusted authors, a `/review`
-comment to opt anyone else in. Read `README.md` for the flow and setup.
+comment to opt anyone else in. `README.md` has the setup.
 
 ## Direction
 
 - Free to run and nothing to babysit. Cloudflare Worker free plan plus GitHub
-  Actions on this repo. No servers, no databases, no queues.
+  Actions on this repo. No servers, databases or queues, and no VPS: one more
+  machine to keep alive for a job that runs a few times a day.
 - Zero runtime dependencies. Node 22 built-ins and the Workers runtime cover
-  everything needed; keep it that way.
+  everything; keep it that way.
 - Policy lives in config, not in code. Settings that give nothing away are in
   `reviewbot.json`; who the bot works for is in the `REVIEWBOT_POLICY` secret.
   The deploy workflow hands the owner list to the Worker so an unwanted install
@@ -22,60 +23,43 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
   lands on a tiny model just because it was up.
 - Nothing checked into this repo names an account, a repo or a person, in code,
   config, commit messages, PR descriptions or docs. It is public and the repos
-  it reviews are not. Placeholders in docs read `your-login`, `your-org`.
+  it reviews are not. Placeholders read `your-login`, `your-org`.
 - A review must never be wrong about where it points. Inline comments are
-  checked against the real diff and anything the model got wrong is moved into
-  the review body rather than dropped or guessed.
-- A review must not guess about what it cannot see. The model gets a diff and
-  nothing else, so the prompt says so, and `src/facts.js` hands it what can be
-  gathered: the code around each change at the head commit, the names of what
-  sits beside a file the PR adds, and the check runs at head. A gap is named in
-  the prompt, so a silence never reads as an all-clear. The prompt carries
-  today's date, because the model's knowledge is older. Before a comment is
-  posted, `src/verify.js` drops what the code contradicts or what rests on a
-  fact nobody showed. A review that could not be checked never requests changes. A review with nothing
-  left to fix approves, because auto-merge repos wait on the bot's approval; only
-  a review that could not be done properly stays a comment, and it says why.
-  Nothing in there is specific to one repository or one language: this reviews
-  whatever it is pointed at.
+  checked against the real diff, and one the model got wrong moves into the
+  review body.
+- A review must not guess about what it cannot see. The prompt says what the
+  model has (the diff, the code around each change at head, the checks) and
+  names every gap, so a silence never reads as an all-clear. It carries today's
+  date, because the model's knowledge is older. `src/verify.js` drops comments
+  the code contradicts or that rest on a fact nobody showed. Nothing here is
+  specific to one repository or language.
+- A clean review approves, because auto-merge repos wait on the bot. A review
+  that could not be done properly (unchecked comments, an unseen file, an
+  incomplete model, open earlier points) stays a comment and says why.
 - Fail loud in the Actions log, quiet on the PR. A skipped PR gets a log line,
   not a comment.
-- Only a parsed review is ever published. A reply that is working notes, a
-  safety classifier verdict, or a chain of thought cut off by the token limit
-  is retried, and a job that never gets a review fails instead of posting one.
-- Nothing in a run title or a log line may name a repo, an owner or an author. New log output goes
-  through the redactor in `src/log.js`, and new workflow expressions use
-  `client_payload.ref`, never `client_payload.repo`.
+- Only a parsed review is published. Working notes, a classifier verdict or a
+  truncated chain of thought is retried, and a job that never gets a review
+  fails instead of posting one.
+- Nothing in a run title or a log line may name a repo, an owner or an author.
+  New log output goes through the redactor in `src/log.js`, and new workflow
+  expressions use `client_payload.ref`, never `client_payload.repo`.
 
 ## Layout
 
-- `worker/` Cloudflare Worker relay, deployed by `.github/workflows/deploy-worker.yml`.
-- `src/review.js` entry point run by `.github/workflows/review.yml`.
-- `src/log.js` the log redactor. `src/config.js` `reviewbot.json` plus the
-  policy secret. `src/policy.js` who gets reviewed. `src/diff.js` patch parsing and budget.
-  `src/prompt.js` model prompts, lenient JSON parsing, and the house style
-  applied to model text. `src/style.js` rewrites the long dashes out of a
-  review before it is published. `src/github.js` App
-  JWT, installation token, tiny REST and GraphQL client. `src/openrouter.js`
-  completion with retries. `src/reply.js` answers a reply on one of the bot's
-  review threads, and approves the PR once every thread from the last
-  `REQUEST_CHANGES` review is settled. `src/facts.js` gathers what a review can
-  check instead of guess at: the code around the changes at head, the names beside
-  a file the PR adds, and the check runs at head. `src/lookup.js` downloads the
-  repository at head and reads it (surrounding code, declarations of a name), and
-  `src/verify.js` audits the comments before they are posted. `src/models.js` ranks the free
-  models and builds the rotation a run tries, and `src/refresh-models.js` is the
-  weekly job that re-picks the pins and opens the PR.
+- `worker/` the Cloudflare Worker relay, deployed by `deploy-worker.yml`.
+- `src/review.js` the entry point `review.yml` runs. `src/reply.js` answers
+  replies on review threads. The rest of `src/` is one concern per file, named
+  for it, and each opens with a comment saying what it is for.
 - `test/` `node --test` suites for everything that does not need the network.
-- `scripts/setup.sh` human setup wizard, kept because setup repeats on a fresh
+- `scripts/setup.sh` the setup wizard, kept because setup repeats on a fresh
   account.
 
 ## Working here
 
 - `pnpm test` before a PR. CI runs the same thing.
-- This repo's own PRs are reviewed by this bot once it is installed here. The
-  review arrives as a PR review from the App's bot user with a footer naming
-  the model.
+- This repo's PRs are reviewed by the bot as the App's bot user, with a footer
+  naming the model.
 - No emojis anywhere, no AI co-authors, commits with the machine's global git
   identity. Branch and PR for everything; never push to `master`.
 
@@ -83,20 +67,20 @@ comment to opt anyone else in. Read `README.md` for the flow and setup.
 
 - **job**: the small object the Worker dispatches (`repo`, `pr`, `installation`,
   `event`, `action`, `author`, `sender`, `draft`, `comment_id`, `ref`, `thread`).
-  The reviewer decides from it and from the loaded config alone.
+  The reviewer decides from it and the loaded config alone.
 - **owner**: the single login in `REVIEWBOT_POLICY` that may issue `/review`.
 - **allowed author**: a login whose PRs get reviewed automatically.
-- **forced review**: a review requested with `/review`. Skips the author
-  list, but not the already-reviewed check: the marker is what says the diff
-  has been read, and a second read of an unchanged head says nothing new.
+- **forced review**: one requested with `/review`. It skips the author list but
+  not the already-reviewed check, because a second read of an unchanged head
+  says nothing new.
 - **ref**: the Worker's anonymous handle for a repo, an HMAC of the full name
   keyed by the webhook secret. The only name for a repo that reaches the public
   Actions log.
 - **marker**: the `<!-- review-bot head=SHA -->` comment in each review body,
   used to avoid reviewing the same head commit twice.
-- **stray comment**: a model comment whose path or line is not in the diff.
-  It is listed in the review body under "Other notes" instead of inline.
+- **stray comment**: a model comment whose path or line is not in the diff,
+  listed in the review body under "Other notes".
 - **settled**: a bot review thread whose latest bot reply carries the
-  `<!-- review-bot settled -->` marker, meaning the concern is dropped from
-  future reviews and, once every thread from the same review is settled,
-  clears that review's `REQUEST_CHANGES`.
+  `<!-- review-bot settled -->` marker. The concern is dropped from future
+  reviews, and once every thread from one review is settled that review's
+  `REQUEST_CHANGES` is lifted.

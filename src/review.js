@@ -34,6 +34,9 @@ const API_RUNS = () => `/repos/${process.env.GITHUB_REPOSITORY}/actions/runs`;
 
 // readJob takes EVENT_JSON when set, for a run by hand, and otherwise the
 // repository_dispatch payload from the file Actions writes to GITHUB_EVENT_PATH.
+// By hand, with APP_ID, APP_PRIVATE_KEY and OPENROUTER_API_KEY in .env:
+//   EVENT_JSON='{"event":"pull_request","action":"opened","repo":"you/x","pr":1,"installation":123,"author":"you","sender":"you","draft":false,"ref":"local"}' \
+//   REVIEWBOT_POLICY='{"owner":"you","allowed_repo_owners":["you"],"allowed_authors":["you"]}' node --env-file=.env src/review.js
 function readJob() {
   if (process.env.EVENT_JSON) return JSON.parse(process.env.EVENT_JSON);
   return JSON.parse(readFileSync(requireEnv("GITHUB_EVENT_PATH"), "utf8")).client_payload;
