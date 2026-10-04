@@ -2,7 +2,7 @@
 // against the code instead of guessing. The tree is downloaded once into a
 // scratch directory on the runner and read with grep and the filesystem.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -31,7 +31,12 @@ export async function downloadTree(token, repo, sha, { maxBytes = MAX_TREE_BYTES
       done(bytes > maxBytes ? new Error("repository too large to read") : null, chunk);
     },
   });
-  await Promise.all([pipeline(Readable.fromWeb(res.body), cap, tar.stdin), exited]);
+  try {
+    await Promise.all([pipeline(Readable.fromWeb(res.body), cap, tar.stdin), exited]);
+  } catch (e) {
+    rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
   return dir;
 }
 
@@ -117,6 +122,7 @@ const MODIFIERS = "((export|pub|public|private|protected|static|async|final|abst
 export function definitionsOf(dir, names, { hits = 2, lines = 10, ignore_paths = [] } = {}) {
   const out = [];
   for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
     const found = spawnSync(
       "grep",
       ["-rIn", "-E", "--exclude-dir=.git", "--exclude-dir=node_modules", "-e", `^[[:space:]]*${MODIFIERS}${DECL}[[:space:]]+${name}\\b`, "-e", `^[[:space:]]*${name}[[:space:]]*(:[^=]*)?=[^=]`, "."],

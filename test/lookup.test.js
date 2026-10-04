@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { definitionsOf, downloadTree, headContext, identifiers, readFileAt, textsOf, windowOf } from "../src/lookup.js";
 
@@ -71,19 +71,31 @@ function serving(t, res) {
   globalThis.fetch = async () => res;
 }
 
-test("the repository is downloaded without its top-level folder and can be read", async (t) => {
-  const scratch = fileURLToPath(new URL("../node_modules/.scratch", import.meta.url));
+// The scratch directory is inside node_modules, which is ignored, so a run leaves nothing to commit and never touches the OS tmpdir.
+const scratch = fileURLToPath(new URL("../node_modules/.scratch", import.meta.url));
+const useScratch = (t) => {
   mkdirSync(scratch, { recursive: true });
   t.after(() => delete process.env.RUNNER_TEMP);
   process.env.RUNNER_TEMP = scratch;
+};
+
+test("the repository is downloaded without its top-level folder and can be read", async (t) => {
+  useScratch(t);
   serving(t, new Response(tarball()));
   const dir = await downloadTree("token", "o/r", "abc");
   assert.match(readFileAt(dir, "pkg/exceptions.py"), /class IncompleteRead/);
 });
 
-test("a repository over the size limit, or a refused download, is an error and not a partial tree", async (t) => {
+test("a repository over the size limit, or a refused download, is an error and leaves nothing behind", async (t) => {
+  useScratch(t);
+  const before = readdirSync(scratch).length;
   serving(t, new Response(tarball()));
   await assert.rejects(downloadTree("token", "o/r", "abc", { maxBytes: 10 }), /too large/);
   serving(t, new Response("no", { status: 404 }));
   await assert.rejects(downloadTree("token", "o/r", "abc"), /tarball 404/);
+  assert.equal(readdirSync(scratch).length, before, "the half-extracted tree is removed");
+});
+
+test("a name that is not an identifier is not searched for", () => {
+  assert.deepEqual(definitionsOf(tree, ["IncompleteRead|.*", "a b"]), []);
 });
