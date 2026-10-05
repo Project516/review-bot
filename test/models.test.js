@@ -131,7 +131,7 @@ test("the report tells a human not to delete a model that merely ranked out", ()
   const change = compare(["a/stays:free", "b/low:free"], ranked, rejected, { model_selection: { pin: 1 } });
   const body = renderReport({ ranked, rejected, current: ["a/stays:free", "b/low:free"], change, cfg: { model_selection: { pin: 1 } }, free: 2 });
   assert.ok(body.includes("## Out of the pins this week"), body);
-  assert.match(body, /Nothing to delete/, "the demoted model must not read as broken");
+  assert.match(body, /## Out of the pins this week\n\n- `b\/low:free`/, "the demoted model is listed on its own");
   assert.ok(!/## No longer free/.test(body), "a demotion is not a departure");
 });
 
@@ -182,7 +182,7 @@ test("an unusable fallback setting falls back to the default rather than breakin
   assert.equal(rotate(["a/pin:free"], [], { model_selection: { fallback: "some/router:free" } }).at(-1), "some/router:free", "a real name is used as given");
 });
 
-test("the report names the order, the runners-up, the dead pins, and the leave-outs", () => {
+test("the report names the order, the runners-up, and the dead pins", () => {
   const { ranked, rejected, free } = rank([
     model("a/best", { score: 70 }),
     model("b/second", { score: 60 }),
@@ -196,8 +196,6 @@ test("the report names the order, the runners-up, the dead pins, and the leave-o
   assert.match(body, /- `a\/best:free`/);
   assert.match(body, /- `c\/third:free`/, "the runners-up are listed, they take over when a pin is gone");
   assert.match(body, /## No longer free[\s\S]*- `x\/departed:free`/);
-  assert.match(body, /no published coding score[\s\S]*`d\/no-score:free`/);
-  assert.match(body, /## Was pinned/);
   assert.match(body, /Fetched 2026-09-25/);
   assert.ok(!/[\u2014]/.test(body), "no em dashes");
 });
@@ -283,14 +281,12 @@ test("the bot never writes under the notes heading itself", () => {
   assert.ok(!report.includes(NOTES_HEADING), report);
 });
 
-test("the body says what the PR is and what to check before merging", () => {
-  // The body is the only thing a human reads before deciding, so it has to
-  // answer what this is and what a yes means, not just list model ids.
+test("the body says what the PR is and that it auto-merges", () => {
   const body = oneReport();
   assert.match(body, /## What this is/, body);
-  assert.match(body, /## Before you merge/, body);
+  assert.ok(!/Before you merge|## Left out|## Was pinned/.test(body), body);
   assert.match(body, /reviewbot\.json/, "it names the one file that changes");
-  assert.match(body, /never merged on its own/, "it says a human decides");
+  assert.match(body, /merges automatically/, body);
   assert.ok(!/[—]/.test(body), "no em dashes");
 });
 
@@ -341,7 +337,7 @@ test("the free count counts the free models, and a pin that went paid is named",
   assert.equal(ranked.length, 2, "one of them is too small to review a PR");
   assert.deepEqual(rejected, [{ id: "c/tiny:free", reason: "context under 65536" }]);
   const body = renderReport({ ranked, rejected, current: [], change: compare([], ranked, rejected), free });
-  assert.match(body, /3 free models, 2 of them big enough/, body);
+  assert.match(body, /3 free models, 2 big enough/, body);
   assert.doesNotMatch(body, /cost money now/, "nothing here went paid yet");
 
   // The case the extra sentence was added for: a :free id that stopped being free.
@@ -356,7 +352,7 @@ test("the free count counts the free models, and a pin that went paid is named",
     change: compare([], mixed.ranked, mixed.rejected),
     free: mixed.free,
   });
-  assert.match(paidBody, /1 free models, 1 of them big enough to review a PR, 1 pinned\. 1 more are listed but cost money now\./, paidBody);
+  assert.match(paidBody, /1 free models, 1 big enough to review a PR, 1 pinned\. 1 more now cost money\./, paidBody);
 });
 
 test("the runners-up reach a review run instead of only the pins", () => {

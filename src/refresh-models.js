@@ -1,7 +1,7 @@
 // Weekly refresh of the model pins. Fetches the OpenRouter catalog, ranks the
 // free models, and opens a PR that rewrites the models list in reviewbot.json.
-// It never pushes to master and never merges: the human who reads the ranking
-// decides. Run it by hand with workflow_dispatch, or let the schedule do it.
+// It never pushes to master; the PR it opens is set to auto-merge once the
+// tests pass. Run it by hand with workflow_dispatch, or let the schedule do it.
 //
 // This job names no repo, owner or author, and the only thing it reads out of
 // the catalog is model ids, which are public.
@@ -136,7 +136,7 @@ async function main() {
   for (const g of change.gone) log(`  GONE: ${g.id} (${g.reason})`);
   for (const o of change.outranked) log(`  out of the pins this week: ${o.id} (${o.reason})`);
 
-  const body = renderReport({ ranked, rejected, current, change, cfg, free });
+  const body = renderReport({ ranked, rejected, change, cfg, free });
   if (!change.changed && !runnersChanged) {
     log("this week's ranking matches the pins and the runners-up, nothing to open");
     if (!dryRun) saveReport(body);
@@ -196,11 +196,21 @@ async function openPullRequest({ body, change }) {
     const carried = carryOverNotes(previous);
     await api("PATCH", `/repos/${owner}/${repo}/pulls/${existing[0].number}`, { title, body: withNotes(body, carried) });
     log(`updated open PR #${existing[0].number}: ${title}${carried ? " (kept your notes)" : ""}`);
+    await armAutoMerge(existing[0].node_id);
     return existing[0].html_url;
   }
   const pr = await api("POST", `/repos/${owner}/${repo}/pulls`, { title, body, head: BRANCH, base: "master" });
   log(`opened PR #${pr.number}: ${title}`);
+  await armAutoMerge(pr.node_id);
   return pr.html_url;
+}
+
+async function armAutoMerge(pullRequestId) {
+  await api("POST", "/graphql", {
+    query: "mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }",
+    variables: { id: pullRequestId },
+  });
+  log("auto-merge armed");
 }
 
 async function api(method, path, body) {
@@ -219,7 +229,7 @@ async function api(method, path, body) {
     signal: AbortSignal.timeout(30000),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(`GitHub ${method} ${path} -> ${res.status}: ${JSON.stringify(data).slice(0, 400)}`);
+  if (!res.ok || data.errors?.length) throw new Error(`GitHub ${method} ${path} -> ${res.status}: ${JSON.stringify(data).slice(0, 400)}`);
   return data;
 }
 
