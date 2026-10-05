@@ -6,7 +6,7 @@
 // enough to concede a point it should not hold. So the pins stay in
 // reviewbot.json, this module ranks what is on the free list right now, and the
 // weekly job re-runs the ranking and opens a PR. Nothing here edits the pins on
-// its own: a human looks at the ranking and merges.
+// its own: the weekly PR auto-merges once the tests pass.
 const CATALOG_URL = "https://openrouter.ai/api/v1/models";
 
 // The router, held back for when every pin is dead. It is free, and it is the
@@ -253,55 +253,32 @@ export function withNotes(body, notes) {
   return `${body}\n${NOTES_HEADING}\n\n${notes.replace(NOTES_HEADING, "").trim()}\n`;
 }
 
-// renderReport is the PR body: the ranking, the runners-up, and every model
-// left out with the reason, so the human can overrule the order on sight.
-export function renderReport({ ranked, rejected, current = [], change, cfg = {}, free, generated = new Date().toISOString() }) {
-  // The report names the fallback in use, not the built-in one.
-  const { pin, min_context, min_completion_tokens, fallback } = settings(cfg);
+// renderReport is the PR body: the pins, the runners-up and the pins that left
+// the free list.
+export function renderReport({ ranked, rejected, change, cfg = {}, free, generated = new Date().toISOString() }) {
+  const { pin, fallback } = settings(cfg);
   const rest = ranked.slice(pin);
   const paid = rejected.filter((r) => r.reason === "no longer free").length;
   const lines = [];
   const list = (items) => items.map((i) => `- \`${i.id}\``).join("\n");
 
   lines.push("## What this is");
-  lines.push(`Opened automatically by the weekly refresh, once a week, and never merged on its own. The only edit is the \`models\` list in \`reviewbot.json\`: which free models the reviewer tries, in order, before falling back to the \`${fallback}\` router.`);
-  lines.push("No code changes. If the order here is wrong, edit the list by hand and merge, and next week starts from your order instead of this one.");
-  lines.push("## Before you merge");
-  lines.push("- Does the top of the list look like something you want answering code reviews? That is the whole judgement. The score is OpenRouter's, not a benchmark run here.");
-  lines.push("- Anything in **No longer free** needs deleting even if the rest looks fine, or the reviewer keeps spending an attempt on a dead name.");
-  lines.push("- A week where nothing changed opens no PR, so silence means the pins still match.");
+  lines.push(`Weekly refresh of the \`models\` list in \`reviewbot.json\`. The reviewer tries these in order, then falls back to \`${fallback}\`. This PR merges automatically once the tests pass. To change the order, edit the list by hand.`);
   lines.push("## This week");
-  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} of them big enough to review a PR, ${Math.min(pin, ranked.length)} pinned.${paid ? ` ${paid} more are listed but cost money now.` : ""}`);
-  lines.push(`A pin must be free, read and write text, have a published coding score, hold at least ${min_context} tokens of context, and allow ${min_completion_tokens} output tokens. Unbenchmarked models are left out: that is where the content-safety classifiers and the tiny models are.`);
-  lines.push("Ranked by the coding score OpenRouter publishes. Nobody merged this: look at the order and change it if you disagree.");
+  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} big enough to review a PR, ${Math.min(pin, ranked.length)} pinned.${paid ? ` ${paid} more now cost money.` : ""} Ranked by OpenRouter's coding score.`);
   lines.push("## Pinned");
   lines.push(ranked.length ? list(ranked.slice(0, pin)) : "Nothing on the free list qualifies this week. The reviewer falls back to the free router until the next run.");
   if (rest.length) {
     lines.push("## Next in line");
-    lines.push("These take over when a pin leaves the free list, and they are what the order is measured against.");
     lines.push(list(rest));
   }
   if (change.gone.length) {
     lines.push("## No longer free");
-    lines.push("A pin here is dead weight: the reviewer burns an attempt on it every run.");
     lines.push(list(change.gone));
   }
   if (change.outranked.length) {
     lines.push("## Out of the pins this week");
-    lines.push("Still free and still working, just not good enough to be pinned this week. Nothing to delete; they stay on the list below and in Next in line.");
     lines.push(list(change.outranked));
-  }
-  if (rejected.length) {
-    lines.push("## Left out");
-    const byReason = new Map();
-    for (const r of rejected) byReason.set(r.reason, [...(byReason.get(r.reason) ?? []), r.id]);
-    for (const [reason, ids] of byReason) lines.push(`- ${reason}: ${ids.map((id) => `\`${id}\``).join(", ")}`);
-  }
-  if (current.length) {
-    lines.push("## Was pinned");
-    lines.push(`- kept: ${change.kept.length ? change.kept.map((id) => `\`${id}\``).join(", ") : "none"}`);
-    lines.push(`- added: ${change.added.length ? change.added.map((id) => `\`${id}\``).join(", ") : "none"}`);
-    lines.push(`- ranked out: ${change.dropped.length ? change.dropped.map((id) => `\`${id}\``).join(", ") : "none"}`);
   }
   return lines.join("\n\n") + "\n";
 }

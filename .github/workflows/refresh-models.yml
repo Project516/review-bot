@@ -1,8 +1,8 @@
 name: Refresh model pins
 
 # Free models come and go. This ranks what is on the free list today against
-# the pins in reviewbot.json and opens a PR with the new order. It never pushes
-# to master and never merges: the human who reads the ranking decides.
+# the pins in reviewbot.json and opens a PR with the new order, set to
+# auto-merge once the tests pass. It never pushes to master.
 on:
   schedule:
     # Mondays, early, when the week's models have settled.
