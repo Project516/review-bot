@@ -11,6 +11,13 @@ import { renderDiff } from "./diff.js";
 
 const SETTLED_MARKER = "<!-- review-bot settled -->";
 const HEAD_MARKER = "<!-- review-bot head=";
+const HELD_MARKER = /<!-- review-bot held=([\d,]+) -->\s*$/;
+
+// heldMarker names the root comments of the threads that kept a review from
+// approving. Only the end of the body is read back, so the model cannot forge it.
+export const heldMarker = (ids) => `<!-- review-bot held=${ids.join(",")} -->`;
+
+const heldIds = (body) => (body?.match(HELD_MARKER)?.[1] ?? "").split(",").filter(Boolean).map(Number);
 
 // THREADS_QUERY is shared by review.js, which uses it to find already-settled
 // points to keep out of a fresh review, and by reply.js, which uses it to
@@ -114,15 +121,19 @@ export function latestBotReview(reviews, slug) {
     .at(-1);
 }
 
-// shouldApprove decides whether settling `thread` clears the last
-// CHANGES_REQUESTED review: that review must still apply to the current head,
+// shouldApprove decides whether settling `thread` clears the bot's last
+// review. A CHANGES_REQUESTED review must still apply to the current head,
 // have no stray comments left over, and every thread it rooted must be
-// settled, counting `thread` itself since its marker was just posted. review
-// is REST data (`id`), threads are GraphQL (`databaseId`); the numbers match.
+// settled, counting `thread` itself since its marker was just posted. A
+// COMMENTED review lifts only when it was held back by open threads alone and
+// all of them are settled now. review is REST data (`id`), threads are GraphQL
+// (`databaseId`); the numbers match. `thread` may be omitted for a COMMENTED
+// review.
 export function shouldApprove({ review, threads, thread, slug, headRefOid, postVerdicts, truncated = false }) {
   if (!postVerdicts) return { approve: false, reason: "post_verdicts is false" };
   if (truncated) return { approve: false, reason: "too many threads to check them all" };
   if (!review) return { approve: false, reason: "no open review from the bot" };
+  if (review.state === "COMMENTED") return shouldLiftHeld({ review, threads, slug, headRefOid });
   const root = thread.comments.nodes[0];
   if (root.pullRequestReview?.databaseId !== review.id) {
     return { approve: false, reason: "thread is not from the latest review" };
@@ -134,6 +145,19 @@ export function shouldApprove({ review, threads, thread, slug, headRefOid, postV
   const unsettled = rooted.filter((t) => t.id !== thread.id && !isSettled(t, slug));
   if (unsettled.length) return { approve: false, reason: `${unsettled.length} other thread(s) from that review are not settled` };
   return { approve: true, reason: "all points from the last review are settled" };
+}
+
+function shouldLiftHeld({ review, threads, slug, headRefOid }) {
+  const held = heldIds(review.body);
+  if (!held.length) return { approve: false, reason: "latest review state is COMMENTED" };
+  if (review.commit_id !== headRefOid) return { approve: false, reason: "latest review predates the current head" };
+  if (review.body.includes("**Other notes**")) return { approve: false, reason: "latest review has stray comments outstanding" };
+  const done = held.filter((id) => {
+    const t = threads.find((x) => x.comments.nodes[0]?.databaseId === id);
+    return t && (t.isResolved || isSettled(t, slug));
+  });
+  if (done.length < held.length) return { approve: false, reason: `${held.length - done.length} thread(s) that held the review are not settled` };
+  return { approve: true, reason: "all points that held the last review are settled" };
 }
 
 // staleRequests are the bot's own CHANGES_REQUESTED reviews on earlier heads
@@ -204,10 +228,16 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
 
   await resolveThread(thread.id).catch((e) => log(`reply: resolve failed: ${e.message}`));
 
-  // Re-read after posting: a reply in another thread of the same review may
-  // have settled it while the model was thinking.
-  const fresh = await fetchThreads(api.graphql, job.repo, job.pr);
-  const reviews = await api.paginate(`/repos/${job.repo}/pulls/${job.pr}/reviews`);
+  await approveIfSettled({ api, repo: job.repo, pr: job.pr, thread, slug, cfg, model, log });
+}
+
+// approveIfSettled re-reads the threads and the bot's latest review and
+// approves the head when shouldApprove says the last review is cleared. The
+// re-read matters: a reply in another thread of the same review may have
+// settled it while the model was thinking.
+export async function approveIfSettled({ api, repo, pr, thread, slug, cfg, model, log }) {
+  const fresh = await fetchThreads(api.graphql, repo, pr);
+  const reviews = await api.paginate(`/repos/${repo}/pulls/${pr}/reviews`);
   const review = latestBotReview(reviews, slug);
   const decision = shouldApprove({ review, threads: fresh.threads, thread, slug, headRefOid: fresh.headRefOid, postVerdicts: cfg.post_verdicts, truncated: fresh.truncated });
   if (!decision.approve) {
@@ -216,7 +246,7 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
   }
 
   const headMarker = `<!-- review-bot head=${fresh.headRefOid} -->`;
-  await api.post(`/repos/${job.repo}/pulls/${job.pr}/reviews`, {
+  await api.post(`/repos/${repo}/pulls/${pr}/reviews`, {
     commit_id: fresh.headRefOid,
     event: "APPROVE",
     body: `All points from the last review are settled in the threads.\n\n${footer(model, "approve", headMarker)}`,

@@ -11,7 +11,7 @@ import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { rotate } from "./models.js";
 import { redactor } from "./log.js";
-import { reply, fetchThreads, isSettled, isOpenPoint, staleRequests, footer, fetchChecks } from "./reply.js";
+import { reply, fetchThreads, isSettled, isOpenPoint, staleRequests, approveIfSettled, heldMarker, footer, fetchChecks } from "./reply.js";
 import { siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
 import { downloadTree, headContext } from "./lookup.js";
 import { verify } from "./verify.js";
@@ -110,7 +110,7 @@ async function main() {
   try {
     const slug = await appSlug(appId, privateKey);
     const { threads } = await fetchThreads(api.graphql, job.repo, job.pr);
-    const point = (t) => ({ path: t.comments.nodes[0].path, body: t.comments.nodes[0].body });
+    const point = (t) => ({ id: t.comments.nodes[0].databaseId, path: t.comments.nodes[0].path, body: t.comments.nodes[0].body });
     settled = threads.filter((t) => isSettled(t, slug)).map(point);
     open = threads.filter((t) => isOpenPoint(t, slug)).map(point);
   } catch (e) {
@@ -180,7 +180,8 @@ async function main() {
   review.verdict = split.verdict;
   if (review.verdict !== outcome.verdict || outcome.note) log(`verdict ${review.verdict}: ${outcome.note || "request without an inline comment"}`);
 
-  const body = (extra) => [review.summary, sync && !sync.empty ? sync.note : "", outcome.note, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
+  const footerMarker = outcome.heldByOpen && open?.length ? `${marker}\n${heldMarker(open.map((p) => p.id))}` : marker;
+  const body = (extra) => [review.summary, sync && !sync.empty ? sync.note : "", outcome.note, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, footerMarker)].filter(Boolean).join("\n\n");
   const event = cfg.post_verdicts ? VERDICT_EVENT[review.verdict] : "COMMENT";
 
   // Nothing has been published up to here, so this is the last cheap moment
@@ -208,6 +209,13 @@ async function main() {
 
   if (event === "COMMENT" && review.verdict === "comment" && cfg.post_verdicts) {
     await liftStaleRequests({ api, base, job, pr, appId, privateKey, log }).catch((e) => log(`earlier requests not lifted: ${e.message}`));
+  }
+
+  // The threads may have been settled while the model worked, and no reply
+  // will come after this review to lift it.
+  if (event === "COMMENT" && outcome.heldByOpen && cfg.post_verdicts) {
+    const slug = await appSlug(appId, privateKey);
+    await approveIfSettled({ api, repo: job.repo, pr: job.pr, slug, cfg, model, log }).catch((e) => log(`held review not lifted: ${e.message}`));
   }
 }
 

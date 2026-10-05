@@ -148,6 +148,14 @@ test("a review that could not be done stays a comment and says why", () => {
   assert.equal(settleVerdict({ verdict: "request_changes", kept, unchecked: true }).verdict, "comment");
 });
 
+test("only open threads holding back an otherwise clean review mark it as liftable", () => {
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1 }).heldByOpen, true);
+  assert.equal(settleVerdict({ verdict: "request_changes", kept: [{}], open: 1 }).heldByOpen, false, "the model found something");
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, unseen: ["a.js"] }).heldByOpen, undefined, "unseen diff is another reason");
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, complete: false }).heldByOpen, undefined);
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, unchecked: true }).heldByOpen, undefined);
+});
+
 test("a reviewer that says it could not see enough, or threads that could not be read, keep the review a comment", () => {
   const incomplete = settleVerdict({ verdict: "comment", kept: [], complete: false });
   assert.equal(incomplete.verdict, "comment");

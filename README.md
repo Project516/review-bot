@@ -16,8 +16,8 @@ is one Actions secret, and the logs name nothing either.
   repo contradicts or that rest on facts it was not shown.
 - Approves when nothing needs fixing, so repos that auto-merge can use it as the
   gate. It requests changes only for a defect that survived the check.
-- Answers replies on its threads, and lifts its own request for changes once
-  every thread is settled.
+- Answers replies on its threads, and lifts its own request for changes, or a
+  comment held back by open threads, once every thread is settled.
 
 ```
 webhook -> Cloudflare Worker -> repository_dispatch -> Actions in this repo -> OpenRouter -> review

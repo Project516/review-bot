@@ -84,4 +84,5 @@ comment to opt anyone else in. `README.md` has the setup.
 - **settled**: a bot review thread whose latest bot reply carries the
   `<!-- review-bot settled -->` marker. The concern is dropped from future
   reviews, and once every thread from one review is settled that review's
-  `REQUEST_CHANGES` is lifted.
+  `REQUEST_CHANGES` is lifted. A comment held back only by open threads names
+  them in a `<!-- review-bot held=IDS -->` marker and is lifted the same way.
