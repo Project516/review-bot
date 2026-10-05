@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isBot, findThread, isSettled, isOpenPoint, staleRequests, skipReason, latestBotReview, shouldApprove, footer, fetchChecks } from "../src/reply.js";
+import { isBot, findThread, isSettled, isOpenPoint, staleRequests, skipReason, latestBotReview, shouldApprove, approveIfSettled, heldMarker, footer, fetchChecks } from "../src/reply.js";
 
 const SLUG = "review-bot";
 const bot = (login) => ({ login });
@@ -89,6 +89,32 @@ test("shouldApprove requires the settled thread to belong to a current, unfinish
   assert.equal(shouldApprove({ ...base, threads: [thread, otherThread] }).approve, false);
 });
 
+test("shouldApprove lifts a comment that only open threads held back, once they are settled", () => {
+  const settledReply = { databaseId: 2, author: bot(SLUG), body: "fixed\n\n<!-- review-bot settled -->" };
+  const held = (id, over = {}) => ({ id: `t${id}`, isResolved: false, comments: { nodes: [comment({ databaseId: id }), settledReply] }, ...over });
+  const body = (ids = [10, 11], extra = "") => `summary\n\nNot approved: 2 earlier points are still open in the threads.${extra}\n\n---\n<sub>x</sub>\n<!-- review-bot head=sha1 -->\n${heldMarker(ids)}`;
+  const review = { id: 200, state: "COMMENTED", commit_id: "sha1", body: body() };
+  const base = { review, threads: [held(10), held(11)], slug: SLUG, headRefOid: "sha1", postVerdicts: true };
+
+  assert.equal(shouldApprove(base).approve, true, "lifted without a thread, as after a review");
+  assert.equal(shouldApprove({ ...base, thread: held(10) }).approve, true, "lifted from a reply");
+  assert.equal(shouldApprove({ ...base, threads: [held(10), held(11, { isResolved: true, comments: { nodes: [comment({ databaseId: 11 })] } })] }).approve, true, "a resolved thread is done");
+
+  assert.equal(shouldApprove({ ...base, headRefOid: "sha2" }).approve, false, "the head moved");
+  assert.equal(shouldApprove({ ...base, postVerdicts: false }).approve, false);
+  assert.equal(shouldApprove({ ...base, truncated: true }).approve, false);
+  assert.equal(shouldApprove({ ...base, review: { ...review, body: body([10, 11], "\n\n**Other notes**\n- x") } }).approve, false, "stray comments still block");
+
+  const unsettled = held(11, { comments: { nodes: [comment({ databaseId: 11 })] } });
+  assert.equal(shouldApprove({ ...base, threads: [held(10), unsettled] }).approve, false, "a thread is still open");
+  assert.equal(shouldApprove({ ...base, threads: [held(10)] }).approve, false, "a thread that cannot be found is not settled");
+
+  const other = { ...review, body: "unseen diff\n\n---\n<sub>x</sub>\n<!-- review-bot head=sha1 -->" };
+  assert.equal(shouldApprove({ ...base, review: other }).approve, false, "a comment for another reason stays a comment");
+  const forged = { ...review, body: `${heldMarker([10])}\n\nmodel text\n\n---\n<sub>x</sub>\n<!-- review-bot head=sha1 -->` };
+  assert.equal(shouldApprove({ ...base, review: forged }).approve, false, "a marker not at the end is ignored");
+});
+
 test("footer names the model, verdict and carries the marker", () => {
   assert.equal(footer("m/x", "approve", "<!-- review-bot head=sha -->"), "---\n<sub>review-bot, model m/x, verdict approve</sub>\n<!-- review-bot head=sha -->");
 });
@@ -128,4 +154,21 @@ test("an earlier request for changes is lifted only when its own threads are set
   assert.deepEqual(lift([request(1, { state: "COMMENTED" })], []), []);
   assert.deepEqual(lift([request(1, { user: { login: "octocat" } })], []), [], "someone else's review is never touched");
   assert.deepEqual(lift([request(1)], [], { truncated: true }), [], "unknown threads are not assumed settled");
+});
+
+test("approveIfSettled approves the head when the held threads are already settled", async () => {
+  const settled = { id: "t", isResolved: true, comments: { nodes: [comment({ databaseId: 10 })], pageInfo: {} } };
+  const posted = [];
+  const reviews = [{ id: 1, user: bot(`${SLUG}[bot]`), state: "COMMENTED", commit_id: "sha1", body: `x\n<!-- review-bot head=sha1 -->\n${heldMarker([10])}` }];
+  const api = {
+    graphql: async () => ({ repository: { pullRequest: { headRefOid: "sha1", reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [settled] } } } }),
+    paginate: async () => reviews,
+    post: async (path, body) => posted.push({ path, body }),
+  };
+  await approveIfSettled({ api, repo: "o/r", pr: 3, slug: SLUG, cfg: { post_verdicts: true }, model: "m/x", log: () => {} });
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].path, "/repos/o/r/pulls/3/reviews");
+  assert.equal(posted[0].body.event, "APPROVE");
+  assert.equal(posted[0].body.commit_id, "sha1");
+  assert.match(posted[0].body.body, /^All points from the last review are settled/);
 });

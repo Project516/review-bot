@@ -91,7 +91,11 @@ export function settleVerdict({ verdict, kept, unchecked = false, unseen = [], o
   if (unchecked) return { verdict: "comment", note: "Not approved: the check on these comments could not run, so they are unverified." };
   if (unseen.length) return { verdict: "comment", note: `Not approved: the diff of ${unseen.join(", ")} was too large to read.` };
   if (open === null) return { verdict: "comment", note: "Not approved: the threads could not be read, so earlier points are unchecked." };
-  if (open) return { verdict: "comment", note: `Not approved: ${open} earlier point${open === 1 ? " is" : "s are"} still open in the threads.` };
+  if (open) {
+    const note = `Not approved: ${open} earlier point${open === 1 ? " is" : "s are"} still open in the threads.`;
+    // heldByOpen: settling those threads is enough to approve this head.
+    return { verdict: "comment", note, heldByOpen: !(verdict === "request_changes" && kept.length) };
+  }
   return { verdict: verdict === "request_changes" && kept.length ? "request_changes" : "approve", note: "" };
 }
 
