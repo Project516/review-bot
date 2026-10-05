@@ -15,6 +15,7 @@ import { reply, fetchThreads, isSettled, isOpenPoint, staleRequests, footer, fet
 import { siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
 import { downloadTree, headContext } from "./lookup.js";
 import { verify } from "./verify.js";
+import { syncDiff, syncPrompt } from "./sync.js";
 
 // Set once the job is parsed, so the top-level failure handler can scrub too.
 let scrub = String;
@@ -91,9 +92,15 @@ async function main() {
     return;
   }
 
-  const files = await api.paginate(`${base}/pulls/${job.pr}/files`);
+  const prFiles = await api.paginate(`${base}/pulls/${job.pr}/files`);
+  const sync = await syncDiff({ api, base, pr, prFiles, cfg, log });
+  // A sync PR is read as the fork's patch on upstream. Inline comments still
+  // anchor to the PR's own diff, so prFiles stays for that.
+  const files = sync ? sync.files : prFiles;
+  if (sync) log(`sync mode: ${files.length} of ${prFiles.length} changed files differ from upstream ${sync.upstream.slice(0, 7)}`);
+  const prView = sync ? { ...pr, changed_files: files.length, additions: sum(files, "additions"), deletions: sum(files, "deletions") } : pr;
   const diff = renderDiff(files, cfg);
-  if (!diff.text) {
+  if (!diff.text && !sync?.empty) {
     log("no reviewable text diff, skipping");
     return;
   }
@@ -110,62 +117,70 @@ async function main() {
     log(`earlier points unavailable, reviewing without them: ${e.message}`);
   }
 
-  // The head commit, read once: the facts take the code around each change from
-  // it and the check on the comments takes declarations from it.
   let tree = null;
-  try {
-    tree = await downloadTree(token, job.repo, pr.head.sha);
-  } catch (e) {
-    log(`repository unreadable at head, reviewing on the diff alone: ${e.message}`);
-  }
-
-  // The model sees a diff and nothing else, so a claim it cannot check from the
-  // diff comes out as a guess. Hand it the code around each change at head, what
-  // else sits beside the files it adds, and the check runs at head, so those
-  // guesses stop.
-  let facts = "";
-  try {
-    const context = tree ? headContext(tree, files, cfg) : null;
-    const siblings = await siblingsOf(api, job.repo, pr.base.ref, files, cfg);
-    const checks = checksBrief(await fetchChecks(api, job.repo, pr.head.sha, log));
-    facts = renderFacts({ context, siblings, checks, pr: prFacts({ files, baseRef: pr.base.ref }), max_chars: cfg.max_facts_chars });
-    const shown = [...(context?.values() ?? [])].filter(Boolean).length;
-    log(`facts: ${shown} files with surrounding code, ${[...siblings.keys()].filter((k) => !k.endsWith("/")).length} folders listed, checks ${checks ? "read" : "unavailable"}`);
-  } catch (e) {
-    log(`facts unavailable, reviewing on the diff alone: ${e.message}`);
-  }
-
-  const { value: review, model } = await complete({
-    apiKey: requireEnv("OPENROUTER_API_KEY"),
-    models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
-    messages: buildMessages({ pr, diffText: diff.text, omitted: diff.omitted, cut: diff.cut, settled, open: open ?? [], facts }),
-    accept: parseReview,
-    maxTokens: cfg.max_output_tokens,
-    log,
-  });
-  log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
-
-  const patches = new Map(files.map((f) => [f.filename, f.patch]));
-  let comments = anchorByQuote(review.comments, patches);
+  let review;
+  let model = null;
+  let comments = [];
   let unchecked = false;
-  if (cfg.verify !== false && comments.length) {
+  if (sync?.empty) {
+    review = { summary: sync.note, verdict: "approve", complete: true, comments: [] };
+    log("sync mode: nothing fork-specific to review, no model run");
+  } else {
+    // The head commit, read once: the facts take the code around each change from
+    // it and the check on the comments takes declarations from it.
     try {
-      comments = await verify({ comments, files, dir: tree, cfg, apiKey: requireEnv("OPENROUTER_API_KEY"), log });
+      tree = await downloadTree(token, job.repo, pr.head.sha);
     } catch (e) {
-      unchecked = true;
-      log(`verify failed, posting unchecked: ${e.message}`);
+      log(`repository unreadable at head, reviewing on the diff alone: ${e.message}`);
+    }
+
+    // The model sees a diff and nothing else, so a claim it cannot check from the
+    // diff comes out as a guess. Hand it the code around each change at head, what
+    // else sits beside the files it adds, and the check runs at head, so those
+    // guesses stop.
+    let facts = "";
+    try {
+      const context = tree ? headContext(tree, files, cfg) : null;
+      const siblings = await siblingsOf(api, job.repo, pr.base.ref, files, cfg);
+      const checks = checksBrief(await fetchChecks(api, job.repo, pr.head.sha, log));
+      facts = renderFacts({ context, siblings, checks, pr: prFacts({ files, baseRef: pr.base.ref }), max_chars: cfg.max_facts_chars });
+      const shown = [...(context?.values() ?? [])].filter(Boolean).length;
+      log(`facts: ${shown} files with surrounding code, ${[...siblings.keys()].filter((k) => !k.endsWith("/")).length} folders listed, checks ${checks ? "read" : "unavailable"}`);
+    } catch (e) {
+      log(`facts unavailable, reviewing on the diff alone: ${e.message}`);
+    }
+
+    ({ value: review, model } = await complete({
+      apiKey: requireEnv("OPENROUTER_API_KEY"),
+      models: rotate(cfg.models, cfg.model_runners_up ?? [], cfg),
+      messages: buildMessages({ pr: prView, sync: sync ? syncPrompt(sync) : "", diffText: diff.text, omitted: diff.omitted, cut: diff.cut, settled, open: open ?? [], facts }),
+      accept: parseReview,
+      maxTokens: cfg.max_output_tokens,
+      log,
+    }));
+    log(`model ${model} returned ${review.comments.length} comments, verdict ${review.verdict}`);
+
+    const patches = new Map(files.map((f) => [f.filename, f.patch]));
+    comments = anchorByQuote(review.comments, patches);
+    if (cfg.verify !== false && comments.length) {
+      try {
+        comments = await verify({ comments, files, dir: tree, cfg, apiKey: requireEnv("OPENROUTER_API_KEY"), log });
+      } catch (e) {
+        unchecked = true;
+        log(`verify failed, posting unchecked: ${e.message}`);
+      }
     }
   }
 
   const unseen = diff.omitted.filter((o) => o.reason === "diff budget exhausted").map((o) => o.path);
   const outcome = settleVerdict({ verdict: review.verdict, kept: comments, unchecked, unseen, open: open?.length ?? null, complete: review.complete });
-  const valid = new Map(files.map((f) => [f.filename, validLines(f.patch)]));
+  const valid = new Map(prFiles.map((f) => [f.filename, validLines(f.patch)]));
   const split = splitComments(comments, valid, outcome.verdict);
   const { inline, stray } = split;
   review.verdict = split.verdict;
   if (review.verdict !== outcome.verdict || outcome.note) log(`verdict ${review.verdict}: ${outcome.note || "request without an inline comment"}`);
 
-  const body = (extra) => [review.summary, outcome.note, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
+  const body = (extra) => [review.summary, sync && !sync.empty ? sync.note : "", outcome.note, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, marker)].filter(Boolean).join("\n\n");
   const event = cfg.post_verdicts ? VERDICT_EVENT[review.verdict] : "COMMENT";
 
   // Nothing has been published up to here, so this is the last cheap moment
@@ -237,6 +252,8 @@ function install(job) {
   scrub = r.scrub;
   return r.log;
 }
+
+const sum = (list, key) => list.reduce((n, f) => n + f[key], 0);
 
 const fmtStray = (c) => `- \`${c.path}\`${Number.isFinite(c.line) ? `:${c.line}` : ""}: ${c.body}`;
 

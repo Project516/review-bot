@@ -152,7 +152,7 @@ export function staleRequests({ reviews, threads, slug, headSha, truncated = fal
 }
 
 export function footer(model, verdict, marker) {
-  return `---\n<sub>review-bot, model ${model}, verdict ${verdict}</sub>\n${marker}`;
+  return `---\n<sub>review-bot, ${model ? `model ${model}` : "no model run"}, verdict ${verdict}</sub>\n${marker}`;
 }
 
 // fetchChecks lists the first page of check runs on a commit as

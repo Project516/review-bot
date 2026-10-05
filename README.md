@@ -48,6 +48,7 @@ webhook -> Cloudflare Worker -> repository_dispatch -> Actions in this repo -> O
 | `max_diff_chars`, `max_facts_chars`, `max_verify_chars` | budgets for what the model is sent |
 | `max_output_tokens` | room for one answer, enough for a reasoning model's thinking |
 | `ignore_paths` | exact names, `*.suffix`, or `dir/` prefixes to skip |
+| `sync_branch_prefixes` | branch prefixes of upstream sync PRs, empty by default. A merge-commit head on one is reviewed only where it differs from the upstream parent |
 
 ## More
 

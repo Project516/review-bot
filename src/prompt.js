@@ -53,7 +53,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const pointList = (points) => points.map((s) => `- \`${s.path}\`: ${truncate(s.body, 300)}`).join("\n");
 
-export function buildMessages({ pr, diffText, omitted, cut = [], settled = [], open = [], facts = "", date = today() }) {
+export function buildMessages({ pr, diffText, omitted, cut = [], settled = [], open = [], facts = "", sync = "", date = today() }) {
   const settledNote = settled.length
     ? `\n\nPoints already settled in discussion with the author, do not raise them again unless the new code reintroduces the problem:\n${pointList(settled)}`
     : "";
@@ -64,7 +64,7 @@ export function buildMessages({ pr, diffText, omitted, cut = [], settled = [], o
 Repository: ${pr.base.repo.full_name}
 PR #${pr.number}: ${pr.title}
 Branch: ${pr.head.ref} into ${pr.base.ref}
-Files changed: ${pr.changed_files}, +${pr.additions} -${pr.deletions}
+Files changed: ${pr.changed_files}, +${pr.additions} -${pr.deletions}${sync ? `\n\n${sync}` : ""}
 
 PR description:
 ${pr.body?.trim() || "(none)"}
