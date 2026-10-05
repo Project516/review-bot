@@ -229,7 +229,7 @@ async function api(method, path, body) {
     signal: AbortSignal.timeout(30000),
   });
   const data = await res.json();
-  if (!res.ok || data.errors) throw new Error(`GitHub ${method} ${path} -> ${res.status}: ${JSON.stringify(data).slice(0, 400)}`);
+  if (!res.ok || data.errors?.length) throw new Error(`GitHub ${method} ${path} -> ${res.status}: ${JSON.stringify(data).slice(0, 400)}`);
   return data;
 }
 
