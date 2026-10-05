@@ -34,5 +34,9 @@
     "cohere/north-mini-code:free",
     "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+  ],
+  "sync_branch_prefixes": [
+    "sync/",
+    "auto-update/"
   ]
 }

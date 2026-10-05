@@ -80,6 +80,7 @@ comment to opt anyone else in. `README.md` has the setup.
   used to avoid reviewing the same head commit twice.
 - **stray comment**: a model comment whose path or line is not in the diff,
   listed in the review body under "Other notes".
+- **sync PR**: a PR whose head is a merge commit on a `sync_branch_prefixes` branch. Its second parent is the upstream commit, and `src/sync.js` cuts the diff down to the fork's own changes on top of it.
 - **settled**: a bot review thread whose latest bot reply carries the
   `<!-- review-bot settled -->` marker. The concern is dropped from future
   reviews, and once every thread from one review is settled that review's
