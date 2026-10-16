@@ -65,7 +65,7 @@ test("ref is a stable 8 hex handle that depends on the secret", async () => {
 });
 
 test("pick drops events on a PR that is no longer open", () => {
-  const merged = { ...repo, action: "closed", pull_request: { number: 3, state: "closed", user: { login: "helper-bot" }, draft: false }, sender: { login: "octocat" } };
+  const merged = { ...repo, action: "synchronize", pull_request: { number: 3, state: "closed", user: { login: "helper-bot" }, draft: false }, sender: { login: "octocat" } };
   assert.equal(pick("pull_request", merged), null);
   const comment = { ...repo, action: "created", issue: { number: 9, state: "closed", pull_request: {}, user: { login: "someone" } }, comment: { id: 11, body: "/review", user: { login: "octocat" } } };
   assert.equal(pick("issue_comment", comment), null);

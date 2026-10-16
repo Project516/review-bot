@@ -163,6 +163,7 @@ test("approveIfSettled approves the head when the held threads are already settl
   const api = {
     graphql: async () => ({ repository: { pullRequest: { headRefOid: "sha1", reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [settled] } } } }),
     paginate: async () => reviews,
+    get: async () => ({ state: "open", head: { sha: "sha1" } }),
     post: async (path, body) => posted.push({ path, body }),
   };
   await approveIfSettled({ api, repo: "o/r", pr: 3, slug: SLUG, cfg: { post_verdicts: true }, model: "m/x", log: () => {} });
@@ -180,4 +181,20 @@ test("stalePR stops a post on a PR that is no longer open or whose head moved", 
   assert.equal(stalePR(open, "abc1234def"), null);
   assert.equal(stalePR(open), null, "without a reviewed head only the state counts");
   assert.equal(stalePR({ state: "open", head: { sha: "fff9999aaa" } }, "abc1234def"), "head moved to fff9999");
+});
+
+test("approveIfSettled does not approve a PR that closed or moved since the threads were read", async () => {
+  const settled = { id: "t", isResolved: true, comments: { nodes: [comment({ databaseId: 10 })], pageInfo: {} } };
+  const reviews = [{ id: 1, user: bot(`${SLUG}[bot]`), state: "COMMENTED", commit_id: "sha1", body: `x\n<!-- review-bot head=sha1 -->\n${heldMarker([10])}` }];
+  for (const pr of [{ state: "closed", head: { sha: "sha1" } }, { state: "open", head: { sha: "sha2" } }]) {
+    const posted = [];
+    const api = {
+      graphql: async () => ({ repository: { pullRequest: { headRefOid: "sha1", reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [settled] } } } }),
+      paginate: async () => reviews,
+      get: async () => pr,
+      post: async (path, body) => posted.push({ path, body }),
+    };
+    await approveIfSettled({ api, repo: "o/r", pr: 3, slug: SLUG, cfg: { post_verdicts: true }, model: "m/x", log: () => {} });
+    assert.equal(posted.length, 0);
+  }
 });

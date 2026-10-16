@@ -258,6 +258,12 @@ export async function approveIfSettled({ api, repo, pr, thread, slug, cfg, model
     return;
   }
 
+  const stale = stalePR(await api.get(`/repos/${repo}/pulls/${pr}`), fresh.headRefOid);
+  if (stale) {
+    log(`reply: ${stale}, not approving`);
+    return;
+  }
+
   const headMarker = `<!-- review-bot head=${fresh.headRefOid} -->`;
   await api.post(`/repos/${repo}/pulls/${pr}/reviews`, {
     commit_id: fresh.headRefOid,
