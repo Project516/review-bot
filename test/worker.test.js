@@ -6,7 +6,7 @@ import { allowedOwner, pick, ref, verify } from "../worker/index.js";
 const repo = { repository: { full_name: "octocat/x" }, installation: { id: 7 } };
 
 test("pick forwards PR events the reviewer acts on", () => {
-  const p = { ...repo, action: "synchronize", pull_request: { number: 3, user: { login: "helper-bot" }, draft: false }, sender: { login: "octocat" } };
+  const p = { ...repo, action: "synchronize", pull_request: { number: 3, state: "open", user: { login: "helper-bot" }, draft: false }, sender: { login: "octocat" } };
   assert.deepEqual(pick("pull_request", p), {
     repo: "octocat/x", installation: 7, action: "synchronize", event: "pull_request", pr: 3, author: "helper-bot", draft: false, sender: "octocat",
   });
@@ -14,10 +14,10 @@ test("pick forwards PR events the reviewer acts on", () => {
 });
 
 test("pick forwards /review comments on PRs only", () => {
-  const p = { ...repo, action: "created", issue: { number: 9, pull_request: {}, user: { login: "someone" } }, comment: { id: 11, body: "  /review please", user: { login: "octocat" } } };
+  const p = { ...repo, action: "created", issue: { number: 9, state: "open", pull_request: {}, user: { login: "someone" } }, comment: { id: 11, body: "  /review please", user: { login: "octocat" } } };
   assert.equal(pick("issue_comment", p).comment_id, 11);
   assert.equal(pick("issue_comment", { ...p, comment: { ...p.comment, body: "nice" } }), null);
-  assert.equal(pick("issue_comment", { ...p, issue: { number: 9, user: { login: "someone" } } }), null);
+  assert.equal(pick("issue_comment", { ...p, issue: { number: 9, state: "open", user: { login: "someone" } } }), null);
 });
 
 test("verify accepts a good signature and rejects bad ones", async () => {
@@ -34,7 +34,7 @@ test("pick forwards replies to the bot's review comments, not human threads or b
   const p = {
     ...repo,
     action: "created",
-    pull_request: { number: 4, user: { login: "octocat" } },
+    pull_request: { number: 4, state: "open", user: { login: "octocat" } },
     comment: { id: 22, in_reply_to_id: 11, user: { login: "helper-bot" } },
     sender: { login: "helper-bot", type: "User" },
   };
@@ -62,4 +62,13 @@ test("ref is a stable 8 hex handle that depends on the secret", async () => {
   assert.equal(a, await ref("s3cret", "octocat/x"));
   assert.notEqual(a, await ref("s3cret", "octocat/y"));
   assert.notEqual(a, await ref("other", "octocat/x"));
+});
+
+test("pick drops events on a PR that is no longer open", () => {
+  const merged = { ...repo, action: "synchronize", pull_request: { number: 3, state: "closed", user: { login: "helper-bot" }, draft: false }, sender: { login: "octocat" } };
+  assert.equal(pick("pull_request", merged), null);
+  const comment = { ...repo, action: "created", issue: { number: 9, state: "closed", pull_request: {}, user: { login: "someone" } }, comment: { id: 11, body: "/review", user: { login: "octocat" } } };
+  assert.equal(pick("issue_comment", comment), null);
+  const reply = { ...repo, action: "created", pull_request: { number: 4, state: "closed", user: { login: "octocat" } }, comment: { id: 22, in_reply_to_id: 11, user: { login: "helper-bot" } }, sender: { login: "helper-bot", type: "User" } };
+  assert.equal(pick("pull_request_review_comment", reply), null);
 });

@@ -175,6 +175,14 @@ export function staleRequests({ reviews, threads, slug, headSha, truncated = fal
   );
 }
 
+// stalePR says why a review or reply read on this PR must not be posted, or null.
+// A moved head has its own run queued, so the old one stands down.
+export function stalePR(pr, reviewedSha) {
+  if (pr.state !== "open") return `PR is ${pr.state}`;
+  if (reviewedSha && pr.head.sha !== reviewedSha) return `head moved to ${pr.head.sha.slice(0, 7)}`;
+  return null;
+}
+
 export function footer(model, verdict, marker) {
   return `---\n<sub>review-bot, ${model ? `model ${model}` : "no model run"}, verdict ${verdict}</sub>\n${marker}`;
 }
@@ -222,6 +230,11 @@ export async function reply({ api, job, cfg, log, slug, resolveThread, apiKey })
   // The model must not be able to mark a thread settled by writing the marker itself.
   const text = value.reply.replaceAll(SETTLED_MARKER, "").trim();
   const body = `${text}\n\n<sub>review-bot, model ${model}</sub>${marker}`;
+  const stale = stalePR(await api.get(`/repos/${job.repo}/pulls/${job.pr}`));
+  if (stale) {
+    log(`reply: ${stale}, not posting`);
+    return;
+  }
   await api.post(`/repos/${job.repo}/pulls/${job.pr}/comments/${job.thread}/replies`, { body });
   log(`reply: posted, resolved=${value.resolved}`);
   if (!value.resolved) return;
@@ -242,6 +255,12 @@ export async function approveIfSettled({ api, repo, pr, thread, slug, cfg, model
   const decision = shouldApprove({ review, threads: fresh.threads, thread, slug, headRefOid: fresh.headRefOid, postVerdicts: cfg.post_verdicts, truncated: fresh.truncated });
   if (!decision.approve) {
     log(`reply: not approving (${decision.reason})`);
+    return;
+  }
+
+  const stale = stalePR(await api.get(`/repos/${repo}/pulls/${pr}`), fresh.headRefOid);
+  if (stale) {
+    log(`reply: ${stale}, not approving`);
     return;
   }
 
