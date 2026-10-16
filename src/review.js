@@ -11,7 +11,7 @@ import { buildMessages, parseReview } from "./prompt.js";
 import { complete } from "./openrouter.js";
 import { rotate } from "./models.js";
 import { redactor } from "./log.js";
-import { reply, fetchThreads, isSettled, isOpenPoint, staleRequests, approveIfSettled, heldMarker, footer, fetchChecks } from "./reply.js";
+import { reply, fetchThreads, isSettled, isOpenPoint, staleRequests, approveIfSettled, heldMarker, footer, fetchChecks, stalePR } from "./reply.js";
 import { siblingsOf, checksBrief, prFacts, renderFacts } from "./facts.js";
 import { downloadTree, headContext } from "./lookup.js";
 import { verify } from "./verify.js";
@@ -76,6 +76,11 @@ async function main() {
   }
 
   const pr = await api.get(`${base}/pulls/${job.pr}`);
+  const stale = stalePR(pr);
+  if (stale) {
+    log(`${stale}, not reviewing`);
+    return;
+  }
   const marker = `<!-- review-bot head=${pr.head.sha} -->`;
   // Asked here and again just before the post, and asked of a forced
   // review too. The marker says this head has been read already, and a
@@ -195,6 +200,12 @@ async function main() {
   }
   if (await alreadyReviewed()) {
     log(`already reviewed ${pr.head.sha} while this run worked, not posting a second`);
+    return;
+  }
+  // The PR may have merged or moved on while the model worked.
+  const stillCurrent = stalePR(await api.get(`${base}/pulls/${job.pr}`), pr.head.sha);
+  if (stillCurrent) {
+    log(`${stillCurrent}, not posting`);
     return;
   }
 

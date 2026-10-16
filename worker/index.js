@@ -44,6 +44,8 @@ export default {
 // pick turns a webhook into a review job, or null when the event is not one
 // the reviewer acts on. Policy (who is allowed) lives in the reviewer, not here.
 export function pick(event, p) {
+  // A merged or closed PR gets nothing, including events that arrive late.
+  if ((p.pull_request ?? p.issue)?.state !== "open") return null;
   const base = { repo: p.repository?.full_name, installation: p.installation?.id, action: p.action };
   if (event === "pull_request" && PR_ACTIONS.has(p.action)) {
     return {
