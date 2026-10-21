@@ -11,7 +11,8 @@ const cfg = { sync_branch_prefixes: ["sync/"], ignore_paths: ["*.lock"] };
 const pr = { head: { ref: "sync/lib-1.2", sha: HEAD, repo: { full_name: "me/fork" } }, base: { repo: { full_name: "me/fork" } } };
 const file = (filename, extra = {}) => ({ filename, status: "modified", additions: 1, deletions: 0, patch: "@@ -1 +1 @@\n+x", ...extra });
 
-// A fake API keyed by path, counting calls.
+// A fake API keyed by path, counting calls. Like GitHub, it lists the compare
+// files on the first page only.
 function fakeApi({ parents = [{ sha: "b".repeat(40) }, { sha: UP }], compare = [], fail = false } = {}) {
   const calls = [];
   return {
@@ -20,7 +21,8 @@ function fakeApi({ parents = [{ sha: "b".repeat(40) }, { sha: UP }], compare = [
       calls.push(path);
       if (path.includes("/commits/")) return { parents };
       if (fail) throw new Error("compare down");
-      return { files: compare };
+      const page = Number(new URL(path, "https://x").searchParams.get("page") ?? 1);
+      return page === 1 ? { files: compare } : { commits: [] };
     },
   };
 }
@@ -81,10 +83,23 @@ test("a failing compare falls back to normal review, never an approval", async (
   assert.match(logs[0], /reviewing normally/);
 });
 
+test("a fork that differs from upstream in more than 100 files is still read in one call", async () => {
+  const many = Array.from({ length: 144 }, (_, i) => file(`f${i}.js`));
+  const api = fakeApi({ compare: many });
+  const sync = await syncDiff({ api, base: "/r", pr, prFiles: [file("f3.js"), file("upstream-only.js")], cfg });
+  assert.deepEqual(sync.files.map((f) => f.filename), ["f3.js"]);
+  assert.equal(api.calls.length, 2);
+});
+
 test("a compare list that may be cut off is not trusted", async () => {
-  const many = Array.from({ length: 100 }, (_, i) => file(`f${i}.js`));
+  const many = Array.from({ length: 300 }, (_, i) => file(`f${i}.js`));
   const api = fakeApi({ compare: many });
   assert.equal(await syncDiff({ api, base: "/r", pr, prFiles: many, cfg }), null);
+});
+
+test("a compare without a file list is not read as a clean merge", async () => {
+  const api = { get: async (path) => (path.includes("/commits/") ? { parents: [{ sha: "b".repeat(40) }, { sha: UP }] } : { commits: [] }) };
+  assert.equal(await syncDiff({ api, base: "/r", pr, prFiles: [file("a.js")], cfg }), null);
 });
 
 test("isSyncBranch matches prefixes and ignores empty ones", () => {
