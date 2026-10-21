@@ -3,8 +3,9 @@
 // patch on top of the new upstream code, so only that is reviewed.
 import { ignored } from "./diff.js";
 
-const PAGE = 100;
-const MAX_PAGES = 3; // the compare API lists at most 300 files
+// The compare API lists at most 300 files, all on the first page. Its paging
+// is over commits, so later pages have no file list.
+const MAX_FILES = 300;
 
 export const isSyncBranch = (ref, prefixes = []) => typeof ref === "string" && prefixes.some((p) => p && ref.startsWith(p));
 
@@ -22,13 +23,9 @@ export async function syncDiff({ api, base, pr, prFiles, cfg, log = () => {} }) 
       return null;
     }
     const upstream = commit.parents[1].sha;
-    const changed = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const res = await api.get(`${base}/compare/${upstream}...${pr.head.sha}?per_page=${PAGE}&page=${page}`);
-      changed.push(...res.files);
-      if (res.files.length < PAGE) break;
-    }
-    if (changed.length >= PAGE * MAX_PAGES) {
+    const { files: changed } = await api.get(`${base}/compare/${upstream}...${pr.head.sha}?per_page=1`);
+    if (!Array.isArray(changed)) throw new Error("the compare has no file list");
+    if (changed.length >= MAX_FILES) {
       log("sync compare may be cut off, reviewing normally");
       return null;
     }
