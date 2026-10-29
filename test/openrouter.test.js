@@ -16,6 +16,41 @@ function stub(responses) {
 
 const run = (accept) => complete({ apiKey: "k", models: ["a", "b"], messages: [{ role: "user", content: "x" }], accept, backoff: 0, log: () => {} });
 
+for (const phase of ["fetch", "body"]) {
+  test(`retries a ${phase} connection failure on the next model`, async (t) => {
+    const original = globalThis.fetch;
+    t.after(() => (globalThis.fetch = original));
+    const calls = [];
+    const disconnected = () => {
+      throw new TypeError("terminated", { cause: Object.assign(new Error("stream closed"), { code: "ECONNRESET" }) });
+    };
+    globalThis.fetch = async (_url, init) => {
+      calls.push(JSON.parse(init.body));
+      if (calls.length > 1) return reply("ok");
+      if (phase === "fetch") disconnected();
+      return { text: disconnected };
+    };
+    const logs = [];
+    const { value } = await complete({ apiKey: "k", models: ["a", "b"], messages: [], backoff: 0, log: (line) => logs.push(line) });
+    assert.equal(value, "ok");
+    assert.deepEqual(calls.map((call) => call.model), ["a", "b"]);
+    assert.match(logs[0], /terminated.*ECONNRESET/);
+    assert.equal(calls[1].messages.length, 0, "a connection failure does not nudge the model");
+  });
+}
+
+test("connection failures exhaust the attempt budget and keep the cause", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => (globalThis.fetch = original));
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new TypeError("fetch failed", { cause: Object.assign(new Error("stream closed"), { code: "ECONNRESET" }) });
+  };
+  await assert.rejects(run(), /gave up after 5 attempts.*fetch failed.*ECONNRESET/);
+  assert.equal(calls, 5);
+});
+
 test("retries when the reply is not a review and nudges the next attempt", async (t) => {
   const original = globalThis.fetch;
   t.after(() => (globalThis.fetch = original));
