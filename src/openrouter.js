@@ -98,22 +98,29 @@ export async function complete({ apiKey, models, messages, accept = (t) => t, at
     const model = nextLive();
     if (!model) break;
     used++;
-    const res = await fetch(URL, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: nudge ? [...messages, NUDGE] : messages,
-        temperature: 0.2,
-        max_tokens: maxTokens,
-        // Keep a reasoning model's trace out of the content we publish.
-        reasoning: { exclude: true },
-      }),
-    });
-    const body = await res.text();
+    let res, body;
+    try {
+      res = await fetch(URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: nudge ? [...messages, NUDGE] : messages,
+          temperature: 0.2,
+          max_tokens: maxTokens,
+          // Keep a reasoning model's trace out of the content we publish.
+          reasoning: { exclude: true },
+        }),
+      });
+      body = await res.text();
+    } catch (e) {
+      // A disconnected response spends an attempt, not the whole run.
+      last = `${model} connection failed: ${e.message}${e.cause ? ` (${e.cause.code ?? e.cause.message})` : ""}`;
+      continue;
+    }
     if (!res.ok) {
       // Every status below is something the next model can answer differently,
       // so none of them ends the run. 400 and 404 are what a model that left the
