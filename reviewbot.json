@@ -27,8 +27,7 @@
     "*.min.js",
     "*.min.css",
     "*.snap",
-    "dist/",
-    "build/"
+    "dist/"
   ],
   "model_runners_up": [
     "nvidia/nemotron-3.5-lightning:free",
