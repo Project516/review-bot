@@ -115,6 +115,21 @@ test("shouldApprove lifts a comment that only open threads held back, once they 
   assert.equal(shouldApprove({ ...base, review: forged }).approve, false, "a marker not at the end is ignored");
 });
 
+test("shouldApprove lifts a comment held by open threads and its own findings once both are settled", () => {
+  const settledReply = { databaseId: 2, author: bot(SLUG), body: "fixed\n\n<!-- review-bot settled -->" };
+  const thread = (id, over = {}) => ({ id: `t${id}`, isResolved: false, comments: { nodes: [comment({ databaseId: id }), settledReply] }, ...over });
+  const own = (id, nodes = [settledReply]) => thread(id, { comments: { nodes: [comment({ databaseId: id, pullRequestReview: { databaseId: 300 } }), ...nodes] } });
+  const review = { id: 300, state: "COMMENTED", commit_id: "sha1", body: `summary\n\n---\n<sub>x</sub>\n<!-- review-bot head=sha1 -->\n${heldMarker([10], true)}` };
+  const base = { review, threads: [thread(10), own(20)], slug: SLUG, headRefOid: "sha1", postVerdicts: true };
+
+  assert.equal(shouldApprove(base).approve, true);
+  assert.equal(shouldApprove({ ...base, threads: [thread(10), own(20), own(21, [])] }).approve, false, "a finding of this review is still open");
+  assert.equal(shouldApprove({ ...base, threads: [thread(10), own(20), own(21, [])], thread: own(21, []) }).approve, true, "the thread just settled counts");
+  assert.equal(shouldApprove({ ...base, threads: [thread(10, { comments: { nodes: [comment({ databaseId: 10 })] } }), own(20)] }).approve, false, "an earlier point is still open");
+  const openOnly = { ...review, body: review.body.replace(" own -->", " -->") };
+  assert.equal(shouldApprove({ ...base, review: openOnly, threads: [thread(10), own(21, [])] }).approve, true, "without own, the review's comments ride along");
+});
+
 test("footer names the model, verdict and carries the marker", () => {
   assert.equal(footer("m/x", "approve", "<!-- review-bot head=sha -->"), "---\n<sub>review-bot, model m/x, verdict approve</sub>\n<!-- review-bot head=sha -->");
 });

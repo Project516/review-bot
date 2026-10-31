@@ -93,8 +93,9 @@ export function settleVerdict({ verdict, kept, unchecked = false, unseen = [], o
   if (open === null) return { verdict: "comment", note: "Not approved: the threads could not be read, so earlier points are unchecked." };
   if (open) {
     const note = `Not approved: ${open} earlier point${open === 1 ? " is" : "s are"} still open in the threads.`;
-    // heldByOpen: settling those threads is enough to approve this head.
-    return { verdict: "comment", note, heldByOpen: !(verdict === "request_changes" && kept.length) };
+    // Settling those threads approves this head. own: so must settling the
+    // threads this review starts, when its findings would have blocked it.
+    return { verdict: "comment", note, held: true, own: verdict === "request_changes" && kept.length > 0 };
   }
   return { verdict: verdict === "request_changes" && kept.length ? "request_changes" : "approve", note: "" };
 }

@@ -11,13 +11,17 @@ import { renderDiff } from "./diff.js";
 
 const SETTLED_MARKER = "<!-- review-bot settled -->";
 const HEAD_MARKER = "<!-- review-bot head=";
-const HELD_MARKER = /<!-- review-bot held=([\d,]+) -->\s*$/;
+const HELD_MARKER = /<!-- review-bot held=([\d,]+)( own)? -->\s*$/;
 
 // heldMarker names the root comments of the threads that kept a review from
-// approving. Only the end of the body is read back, so the model cannot forge it.
-export const heldMarker = (ids) => `<!-- review-bot held=${ids.join(",")} -->`;
+// approving, and with `own` the threads the review itself started count too.
+// Only the end of the body is read back, so the model cannot forge it.
+export const heldMarker = (ids, own = false) => `<!-- review-bot held=${ids.join(",")}${own ? " own" : ""} -->`;
 
-const heldIds = (body) => (body?.match(HELD_MARKER)?.[1] ?? "").split(",").filter(Boolean).map(Number);
+function parseHeld(body) {
+  const m = body?.match(HELD_MARKER);
+  return { ids: (m?.[1] ?? "").split(",").filter(Boolean).map(Number), own: Boolean(m?.[2]) };
+}
 
 // THREADS_QUERY is shared by review.js, which uses it to find already-settled
 // points to keep out of a fresh review, and by reply.js, which uses it to
@@ -125,15 +129,15 @@ export function latestBotReview(reviews, slug) {
 // review. A CHANGES_REQUESTED review must still apply to the current head,
 // have no stray comments left over, and every thread it rooted must be
 // settled, counting `thread` itself since its marker was just posted. A
-// COMMENTED review lifts only when it was held back by open threads alone and
-// all of them are settled now. review is REST data (`id`), threads are GraphQL
+// COMMENTED review lifts only when it carries a held marker and every thread
+// the marker covers is settled now. review is REST data (`id`), threads are GraphQL
 // (`databaseId`); the numbers match. `thread` may be omitted for a COMMENTED
 // review.
 export function shouldApprove({ review, threads, thread, slug, headRefOid, postVerdicts, truncated = false }) {
   if (!postVerdicts) return { approve: false, reason: "post_verdicts is false" };
   if (truncated) return { approve: false, reason: "too many threads to check them all" };
   if (!review) return { approve: false, reason: "no open review from the bot" };
-  if (review.state === "COMMENTED") return shouldLiftHeld({ review, threads, slug, headRefOid });
+  if (review.state === "COMMENTED") return shouldLiftHeld({ review, threads, thread, slug, headRefOid });
   const root = thread.comments.nodes[0];
   if (root.pullRequestReview?.databaseId !== review.id) {
     return { approve: false, reason: "thread is not from the latest review" };
@@ -141,14 +145,13 @@ export function shouldApprove({ review, threads, thread, slug, headRefOid, postV
   if (review.state !== "CHANGES_REQUESTED") return { approve: false, reason: `latest review state is ${review.state}` };
   if (review.commit_id !== headRefOid) return { approve: false, reason: "latest review predates the current head" };
   if (review.body?.includes("**Other notes**")) return { approve: false, reason: "latest review has stray comments outstanding" };
-  const rooted = threads.filter((t) => t.comments.nodes[0]?.pullRequestReview?.databaseId === review.id);
-  const unsettled = rooted.filter((t) => t.id !== thread.id && !isSettled(t, slug));
-  if (unsettled.length) return { approve: false, reason: `${unsettled.length} other thread(s) from that review are not settled` };
+  const unsettled = unsettledOwn({ review, threads, thread, slug });
+  if (unsettled) return { approve: false, reason: `${unsettled} other thread(s) from that review are not settled` };
   return { approve: true, reason: "all points from the last review are settled" };
 }
 
-function shouldLiftHeld({ review, threads, slug, headRefOid }) {
-  const held = heldIds(review.body);
+function shouldLiftHeld({ review, threads, thread, slug, headRefOid }) {
+  const { ids: held, own } = parseHeld(review.body);
   if (!held.length) return { approve: false, reason: "latest review state is COMMENTED" };
   if (review.commit_id !== headRefOid) return { approve: false, reason: "latest review predates the current head" };
   if (review.body.includes("**Other notes**")) return { approve: false, reason: "latest review has stray comments outstanding" };
@@ -157,7 +160,15 @@ function shouldLiftHeld({ review, threads, slug, headRefOid }) {
     return t && (t.isResolved || isSettled(t, slug));
   });
   if (done.length < held.length) return { approve: false, reason: `${held.length - done.length} thread(s) that held the review are not settled` };
+  const unsettled = own ? unsettledOwn({ review, threads, thread, slug }) : 0;
+  if (unsettled) return { approve: false, reason: `${unsettled} thread(s) from that review are not settled` };
   return { approve: true, reason: "all points that held the last review are settled" };
+}
+
+// unsettledOwn counts the threads `review` started that are not settled,
+// other than `thread`.
+function unsettledOwn({ review, threads, thread, slug }) {
+  return threads.filter((t) => t.comments.nodes[0]?.pullRequestReview?.databaseId === review.id && t.id !== thread?.id && !isSettled(t, slug)).length;
 }
 
 // staleRequests are the bot's own CHANGES_REQUESTED reviews on earlier heads

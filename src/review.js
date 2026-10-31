@@ -185,7 +185,7 @@ async function main() {
   review.verdict = split.verdict;
   if (review.verdict !== outcome.verdict || outcome.note) log(`verdict ${review.verdict}: ${outcome.note || "request without an inline comment"}`);
 
-  const footerMarker = outcome.heldByOpen && open?.length ? `${marker}\n${heldMarker(open.map((p) => p.id))}` : marker;
+  const footerMarker = outcome.held && open?.length ? `${marker}\n${heldMarker(open.map((p) => p.id), outcome.own)}` : marker;
   const body = (extra) => [review.summary, sync && !sync.empty ? sync.note : "", outcome.note, extra.length ? `**Other notes**\n${extra.map(fmtStray).join("\n")}` : "", footer(model, review.verdict, footerMarker)].filter(Boolean).join("\n\n");
   const event = cfg.post_verdicts ? VERDICT_EVENT[review.verdict] : "COMMENT";
 
@@ -218,13 +218,13 @@ async function main() {
     await api.post(`${base}/pulls/${job.pr}/reviews`, { commit_id: pr.head.sha, event, body: body([...inline, ...stray]) });
   }
 
-  if (event === "COMMENT" && review.verdict === "comment" && cfg.post_verdicts) {
+  if (event === "COMMENT" && review.verdict === "comment" && !outcome.own && cfg.post_verdicts) {
     await liftStaleRequests({ api, base, job, pr, appId, privateKey, log }).catch((e) => log(`earlier requests not lifted: ${e.message}`));
   }
 
   // The threads may have been settled while the model worked, and no reply
   // will come after this review to lift it.
-  if (event === "COMMENT" && outcome.heldByOpen && cfg.post_verdicts) {
+  if (event === "COMMENT" && outcome.held && !outcome.own && cfg.post_verdicts) {
     const slug = await appSlug(appId, privateKey);
     await approveIfSettled({ api, repo: job.repo, pr: job.pr, slug, cfg, model, log }).catch((e) => log(`held review not lifted: ${e.message}`));
   }
