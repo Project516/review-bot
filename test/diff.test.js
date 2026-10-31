@@ -148,12 +148,17 @@ test("a review that could not be done stays a comment and says why", () => {
   assert.equal(settleVerdict({ verdict: "request_changes", kept, unchecked: true }).verdict, "comment");
 });
 
-test("only open threads holding back an otherwise clean review mark it as liftable", () => {
-  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1 }).heldByOpen, true);
-  assert.equal(settleVerdict({ verdict: "request_changes", kept: [{}], open: 1 }).heldByOpen, false, "the model found something");
-  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, unseen: ["a.js"] }).heldByOpen, undefined, "unseen diff is another reason");
-  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, complete: false }).heldByOpen, undefined);
-  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, unchecked: true }).heldByOpen, undefined);
+test("a review held back by open threads is liftable, and says when its own findings must settle too", () => {
+  const clean = settleVerdict({ verdict: "approve", kept: [{}], open: 1 });
+  assert.equal(clean.held, true);
+  assert.equal(clean.own, false, "low-severity comments do not hold it");
+  const found = settleVerdict({ verdict: "request_changes", kept: [{}], open: 1 });
+  assert.equal(found.held, true);
+  assert.equal(found.own, true, "the model found something");
+  assert.equal(settleVerdict({ verdict: "request_changes", kept: [], open: 1 }).own, false, "the audit dropped every finding");
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, unseen: ["a.js"] }).held, undefined, "unseen diff is another reason");
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, complete: false }).held, undefined);
+  assert.equal(settleVerdict({ verdict: "approve", kept: [], open: 1, unchecked: true }).held, undefined);
 });
 
 test("a reviewer that says it could not see enough, or threads that could not be read, keep the review a comment", () => {
