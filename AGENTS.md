@@ -18,9 +18,9 @@ comment to opt anyone else in. `README.md` has the setup.
   The deploy workflow hands the owner list to the Worker so an unwanted install
   is dropped before it costs a run. It is passed, never re-typed.
 - The pins in `reviewbot.json` are the best free models as of the last weekly
-  re-pin, and a human merges that PR. A run is never handed a model that is not
-  free, and the free router is the last resort, never a pin, so a review never
-  lands on a tiny model just because it was up.
+  re-pin. That PR merges itself once the tests pass. A run is never handed a
+  model that is not free, and the free router is the last resort, never a pin,
+  so a review never lands on a tiny model just because it was up.
 - Nothing checked into this repo names an account, a repo or a person, in code,
   config, commit messages, PR descriptions or docs. It is public and the repos
   it reviews are not. Placeholders read `your-login`, `your-org`.
