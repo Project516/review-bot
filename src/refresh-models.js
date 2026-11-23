@@ -97,8 +97,8 @@ async function main() {
   // reset to master before the config is loaded rather than inside the commit
   // step. Otherwise a leftover edit from a previous run would be ranked and
   // then thrown away, and the pins would be planned from a tree the commit does
-  // not match.
-  resetToMaster();
+  // not match. A dry run reads the tree as it is and leaves git alone.
+  if (!dryRun) resetToMaster();
   const cfg = loadConfig();
   const current = Array.isArray(cfg.models) ? cfg.models : [];
   const { pin } = settings(cfg);
