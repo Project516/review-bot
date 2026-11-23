@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rank, planPins, compare, rotate, renderReport, renderPins, parseCatalog, settings, ROUTER, carryOverNotes, withNotes, NOTES_HEADING } from "../src/models.js";
 
-// A catalog row shaped like the real one. score is the published coding index,
+// A catalog row shaped like the real one. score is the published intelligence index,
 // ctx and out the room to work.
 const model = (id, { score = 50, ctx = 262144, out = 32768, free = true, text = true, expiration = null } = {}) => ({
   id: free ? `${id}:free` : id,
@@ -10,11 +10,11 @@ const model = (id, { score = 50, ctx = 262144, out = 32768, free = true, text = 
   architecture: { input_modalities: text ? ["text"] : ["image"], output_modalities: ["text"] },
   pricing: { prompt: free ? 0 : 3, completion: free ? 0 : 15 },
   top_provider: { max_completion_tokens: out },
-  benchmarks: score == null ? {} : { artificial_analysis: { coding_index: score, agentic_index: score / 2, intelligence_index: score / 3 } },
+  benchmarks: score == null ? {} : { artificial_analysis: { coding_index: null, agentic_index: null, intelligence_index: score, engineering_index: score / 2 } },
   expiration_date: expiration,
 });
 
-test("ranks the free models that can actually review a PR, best coding score first", () => {
+test("ranks the free models that can actually review a PR, best intelligence score first", () => {
   const { ranked, rejected, free } = rank([
     model("a/weak", { score: 20 }),
     model("b/strong", { score: 70 }),
@@ -28,10 +28,10 @@ test("ranks the free models that can actually review a PR, best coding score fir
   assert.equal(free, 3, "a paid model is not a free model");
 });
 
-test("leaves out a model with no published coding score, and says why", () => {
+test("leaves out a model with no published intelligence score, and says why", () => {
   const { ranked, rejected } = rank([model("a/unbenchmarked", { score: null }), model("b/scored", { score: 40 })]);
   assert.deepEqual(ranked.map((r) => r.id), ["b/scored:free"]);
-  assert.deepEqual(rejected, [{ id: "a/unbenchmarked:free", reason: "no published coding score" }]);
+  assert.deepEqual(rejected, [{ id: "a/unbenchmarked:free", reason: "no published intelligence score" }]);
 });
 
 test("leaves out a model too small for a PR diff or a review", () => {
@@ -119,7 +119,7 @@ test("a pin that left the free list is reported apart from one that ranked lower
     { id: "d/vanished:free", reason: "no longer in the catalog" },
   ]);
   assert.deepEqual(change.outranked, [
-    { id: "e/unscored:free", reason: "no published coding score" },
+    { id: "e/unscored:free", reason: "no published intelligence score" },
     { id: "f/small:free", reason: "context under 65536" },
   ]);
   assert.deepEqual(change.dropped, ["e/unscored:free", "f/small:free"], "they did fall out of the pins, which is not the same as being gone");

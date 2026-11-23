@@ -85,7 +85,7 @@ function commitAndPush({ current, desired, change }) {
     "-m",
     "Re-pick the free models from the OpenRouter catalog",
     "-m",
-    `Ranked the free models by the coding score OpenRouter publishes and kept the top ${desired.length}.${gone ? ` Left the free list:${gone}` : ""}\n\nOpened by the weekly refresh.`,
+    `Ranked the free models by the intelligence score OpenRouter publishes and kept the top ${desired.length}.${gone ? ` Left the free list:${gone}` : ""}\n\nOpened by the weekly refresh.`,
   );
   git("push", "--force", "origin", `${BRANCH}:${BRANCH}`);
   log(`pushed ${BRANCH}: ${current.join(", ") || "none"} -> ${desired.join(", ")}`);
@@ -116,7 +116,7 @@ async function main() {
   const runnersChanged = desiredRunners.join() !== currentRunners.join();
 
   log(`free models: ${free}, rankable: ${ranked.length}, pinning ${pin}`);
-  for (const r of ranked) log(`  ${String(r.coding).padStart(5)}  ${r.id}  ctx ${r.context}`);
+  for (const r of ranked) log(`  ${String(r.intelligence).padStart(5)}  ${r.id}  ctx ${r.context}`);
   for (const g of change.gone) log(`  GONE: ${g.id} (${g.reason})`);
   for (const o of change.outranked) log(`  out of the pins this week: ${o.id} (${o.reason})`);
 

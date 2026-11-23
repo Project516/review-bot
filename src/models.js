@@ -13,7 +13,7 @@ const CATALOG_URL = "https://openrouter.ai/api/v1/models";
 // one entry that has to be last: it is the fallback, not the plan.
 export const ROUTER = "openrouter/free";
 
-// A pin has to be free, read and write text, need a published coding score so
+// A pin has to be free, read and write text, need a published intelligence score so
 // the choice is not a guess, and have room for a whole PR diff. A model with
 // no score is left out on purpose: the unbenchmarked tail of the free list is
 // where the content-safety classifiers and the 2B models live.
@@ -55,9 +55,10 @@ export function parseCatalog(body) {
 
 const isFree = (m) => text(m.id).endsWith(":free") && Number(m?.pricing?.prompt) === 0 && Number(m?.pricing?.completion) === 0;
 const speaksText = (m) => (m?.architecture?.input_modalities ?? []).includes("text") && (m?.architecture?.output_modalities ?? []).includes("text");
-const coding = (m) => num(m?.benchmarks?.artificial_analysis?.coding_index);
-const agentic = (m) => num(m?.benchmarks?.artificial_analysis?.agentic_index);
+// Artificial Analysis retired its coding and agentic indexes; OpenRouter
+// still sends them, always null.
 const intelligence = (m) => num(m?.benchmarks?.artificial_analysis?.intelligence_index);
+const engineering = (m) => num(m?.benchmarks?.artificial_analysis?.engineering_index);
 // outputCap is the room the provider allows in one completion. A model that does
 // not publish the field is treated as zero, not as unlimited: absent data is not
 // evidence of a large cap, and a missing field that read as Infinity would wave
@@ -91,7 +92,7 @@ export function rank(models, cfg = {}, now = Date.now()) {
     }
     free++;
     const id = text(m.id);
-    const score = coding(m);
+    const score = intelligence(m);
     const reason =
       // Some models answer every non-agentic request with 403, gated to a
       // harness OpenRouter names in the error body. Nothing in the catalog
@@ -100,7 +101,7 @@ export function rank(models, cfg = {}, now = Date.now()) {
       excluded_ids.includes(id) ? "excluded" :
       expired(m, now) ? "expired" :
       !speaksText(m) ? "not a text model" :
-      score == null ? "no published coding score" :
+      score == null ? "no published intelligence score" :
       (num(m.context_length) ?? 0) < min_context ? `context under ${min_context}` :
       outputCap(m) < min_completion_tokens ? `output cap under ${min_completion_tokens}` :
       null;
@@ -110,18 +111,17 @@ export function rank(models, cfg = {}, now = Date.now()) {
     }
     ranked.push({
       id,
-      coding: score,
-      agentic: agentic(m),
-      intelligence: intelligence(m),
+      intelligence: score,
+      engineering: engineering(m),
       context: num(m.context_length),
       output_cap: outputCap(m),
     });
   }
 
-  // Coding score decides, then the agentic and intelligence scores, then the
-  // room to work, then the id so the order never wobbles between runs.
+  // Intelligence score decides, then the engineering score, then the room to
+  // work, then the id so the order never wobbles between runs.
   ranked.sort(
-    (a, b) => b.coding - a.coding || (b.agentic ?? -1) - (a.agentic ?? -1) || (b.intelligence ?? -1) - (a.intelligence ?? -1) || b.context - a.context || a.id.localeCompare(b.id),
+    (a, b) => b.intelligence - a.intelligence || (b.engineering ?? -1) - (a.engineering ?? -1) || b.context - a.context || a.id.localeCompare(b.id),
   );
   return { ranked, rejected: rejected.sort((a, b) => a.id.localeCompare(b.id)), free };
 }
@@ -265,7 +265,7 @@ export function renderReport({ ranked, rejected, change, cfg = {}, free, generat
   lines.push("## What this is");
   lines.push(`Weekly refresh of the \`models\` list in \`reviewbot.json\`. The reviewer tries these in order, then falls back to \`${fallback}\`. This PR merges automatically once the tests pass. To change the order, edit the list by hand.`);
   lines.push("## This week");
-  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} big enough to review a PR, ${Math.min(pin, ranked.length)} pinned.${paid ? ` ${paid} more now cost money.` : ""} Ranked by OpenRouter's coding score.`);
+  lines.push(`Fetched ${generated.slice(0, 10)}: ${free} free models, ${ranked.length} big enough to review a PR, ${Math.min(pin, ranked.length)} pinned.${paid ? ` ${paid} more now cost money.` : ""} Ranked by OpenRouter's intelligence score.`);
   lines.push("## Pinned");
   lines.push(ranked.length ? list(ranked.slice(0, pin)) : "Nothing on the free list qualifies this week. The reviewer falls back to the free router until the next run.");
   if (rest.length) {
